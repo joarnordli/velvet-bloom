@@ -46,7 +46,7 @@ function Inbox() {
   return (
     <AppShell>
       <div className="mx-auto max-w-2xl px-5">
-        <h1 className="font-display text-3xl tracking-tight mb-4">Meldinger</h1>
+        <h1 className="font-display text-2xl tracking-tight mb-4">Meldinger</h1>
         <div className="flex p-1 rounded-full bg-white/5 max-w-sm mb-4">
           <TabButton active={tab === "chats"} onClick={() => setTab("chats")}>
             Samtaler

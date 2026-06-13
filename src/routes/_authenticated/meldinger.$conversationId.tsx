@@ -2,9 +2,8 @@ import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-r
 import { useSuspenseQuery, useMutation, useQueryClient, queryOptions } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, Image as ImageIcon, Send, Smile, X, Loader2, MoreVertical, Pin, PinOff, Trash2 } from "lucide-react";
+import { ArrowLeft, Image as ImageIcon, Send, X, Loader2, MoreVertical, Pin, PinOff, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { EmojiPicker } from "@/components/brand/EmojiPicker";
 
 import {
   DropdownMenu,
@@ -289,7 +288,6 @@ function ThreadInner({ conversationId }: { conversationId: string }) {
   // Composer state
   const [text, setText] = useState("");
   const [pending, setPending] = useState<Pending[]>([]);
-  const [emojiOpen, setEmojiOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const sendMut = useMutation({
@@ -468,7 +466,7 @@ function ThreadInner({ conversationId }: { conversationId: string }) {
   return (
     <>
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 md:px-5 py-3 border-b border-white/5 bg-background shrink-0">
+      <div className="flex items-center gap-3 px-4 md:px-5 py-3 shrink-0">
         <button
           type="button"
           onClick={() => navigate({ to: "/meldinger" })}
@@ -484,12 +482,12 @@ function ThreadInner({ conversationId }: { conversationId: string }) {
             className="flex items-center gap-3 min-w-0 hover:opacity-90 flex-1"
           >
             <Avatar url={otherForDm.avatarUrl} name={title} />
-            <span className="font-medium truncate">{title}</span>
+            <span className="font-display text-xl tracking-tight truncate">{title}</span>
           </Link>
         ) : (
           <div className="flex items-center gap-3 min-w-0 flex-1">
             <Avatar url={null} name={title} />
-            <span className="font-medium truncate">{title}</span>
+            <span className="font-display text-xl tracking-tight truncate">{title}</span>
           </div>
         )}
         <DropdownMenu>
@@ -642,7 +640,7 @@ function ThreadInner({ conversationId }: { conversationId: string }) {
       {!showRecipientBanner && !composerLocked && (
       <form
         onSubmit={submit}
-        className="relative z-10 border-t border-white/5 bg-background px-3 md:px-5 py-3 shrink-0"
+        className="relative z-10 px-3 md:px-5 py-3 shrink-0"
         style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}
       >
         {pending.length > 0 && (
@@ -691,18 +689,10 @@ function ThreadInner({ conversationId }: { conversationId: string }) {
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="h-10 w-10 shrink-0 rounded-full hover:bg-white/5 grid place-items-center text-foreground/70"
+            className="glass h-10 w-10 shrink-0 rounded-full hover:bg-white/10 grid place-items-center text-foreground/80 transition"
             aria-label="Legg ved bilde"
           >
             <ImageIcon className="h-5 w-5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setEmojiOpen((v) => !v)}
-            className="h-10 w-10 shrink-0 rounded-full hover:bg-white/5 grid place-items-center text-foreground/70"
-            aria-label="Emoji"
-          >
-            <Smile className="h-5 w-5" />
           </button>
 
           <textarea
@@ -734,16 +724,6 @@ function ThreadInner({ conversationId }: { conversationId: string }) {
             )}
           </button>
         </div>
-
-        {emojiOpen && (
-          <EmojiPicker
-            onPick={(e) => {
-              setText((t) => t + e);
-              setEmojiOpen(false);
-            }}
-            onClose={() => setEmojiOpen(false)}
-          />
-        )}
       </form>
       )}
     </>

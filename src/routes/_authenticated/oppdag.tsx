@@ -51,8 +51,9 @@ function Oppdag() {
   return (
     <AppShell>
       <div className="mx-auto max-w-2xl">
-        <div className="sticky top-0 md:top-0 z-20 bg-background/85 backdrop-blur px-5 pb-3 pt-2">
-          <div className="glass flex items-center gap-2 rounded-full pl-4 pr-3 py-2.5">
+        <div className="px-5">
+          <h1 className="font-display text-2xl tracking-tight mb-4">Søk</h1>
+          <div className="flex items-center gap-2 rounded-full bg-white/5 pl-4 pr-3 py-2.5">
             <Search className="h-4 w-4 text-foreground/60" />
             <input
               value={text}

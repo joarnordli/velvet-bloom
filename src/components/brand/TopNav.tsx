@@ -9,7 +9,7 @@ export function TopNav() {
   const online = useOnlinePresence();
   const { notifications: notifCount } = useUnreadCounts();
   return (
-    <header className="app-top-nav z-40 md:hidden bg-background border-b border-white/5 pt-[env(safe-area-inset-top)]">
+    <header className="shrink-0 md:hidden bg-background border-b border-white/5 pt-[env(safe-area-inset-top)]">
       <div className="mx-auto max-w-2xl px-5 pt-4 pb-3">
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4">
           <div className="min-w-0">

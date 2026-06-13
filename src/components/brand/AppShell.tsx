@@ -1,19 +1,10 @@
 import type { ReactNode } from "react";
 
 /**
- * Page container. Global chrome (top/bottom nav, FAB, side nav) lives at
- * the router root via <GlobalChrome /> so `position: fixed` actually
- * anchors to the viewport — not to the transformed transition layer.
+ * Thin content wrapper for framed routes. The inner scroller, the top/bottom
+ * chrome, and the md+ SideNav offset all live in <AppFrame> now — this only
+ * adds page padding so route content breathes inside the scroller.
  */
 export function AppShell({ children }: { children: ReactNode }) {
-  return (
-    <div className="min-h-dvh text-foreground">
-      <main className="md:pl-[17rem]">
-        <div className="pt-28 pb-32 md:pt-6 md:pb-10 md:pr-4 [touch-action:pan-y] [overscroll-behavior-x:contain]">
-          {children}
-        </div>
-      </main>
-    </div>
-  );
+  return <div className="pt-2 pb-12 md:pt-6 md:pr-4">{children}</div>;
 }
-

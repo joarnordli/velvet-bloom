@@ -12,7 +12,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { RouteTransitions } from "@/components/brand/RouteTransitions";
-import { GlobalChrome } from "@/components/brand/GlobalChrome";
+import { AppFrame } from "@/components/brand/AppFrame";
 import { useEdgeSwipeBack } from "@/hooks/use-edge-swipe-back";
 import { useTabSwipeNav } from "@/hooks/use-tab-swipe-nav";
 import { DiscreetModeProvider } from "@/context/discreet-mode";
@@ -163,15 +163,14 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <DiscreetModeProvider>
-        {/* Animated route layer — transforms here would scope `fixed` children,
-            so the global app chrome (top/bottom nav, FAB) sits OUTSIDE. */}
-        <RouteTransitions>
-          <Outlet />
-        </RouteTransitions>
-        <GlobalChrome />
+        {/* AppFrame owns the non-scrolling shell + chrome; the animated route
+            layer lives inside its inner scroller. */}
+        <AppFrame>
+          <RouteTransitions>
+            <Outlet />
+          </RouteTransitions>
+        </AppFrame>
       </DiscreetModeProvider>
     </QueryClientProvider>
-
-
   );
 }

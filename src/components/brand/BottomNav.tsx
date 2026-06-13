@@ -16,7 +16,7 @@ export function BottomNav() {
   const { messages: msgCount } = useUnreadCounts();
 
   return (
-    <nav className="app-bottom-nav z-40 pointer-events-none md:hidden pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2">
+    <nav className="shrink-0 pointer-events-none md:hidden pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2">
       <div className="mx-auto max-w-2xl px-5">
         <div data-nochrome-swipe className="glass-strong pointer-events-auto rounded-full px-3 py-2 flex items-center justify-between">
           {items.map((it) => {

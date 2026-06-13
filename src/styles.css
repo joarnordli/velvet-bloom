@@ -96,6 +96,12 @@
     overscroll-behavior: none;
     overscroll-behavior-y: none;
     touch-action: pan-x pan-y;
+    /* App-shell model: the document itself never scrolls. A single inner
+       <main> (see AppFrame) is the scroller and the nav bars are flex
+       siblings — the only layout that keeps the chrome from drifting under the
+       iOS standalone keyboard, since the body has nothing to scroll. */
+    height: 100%;
+    overflow: hidden;
   }
 
   /* iOS Safari auto-zooms when a focused form control has font-size < 16px,
@@ -116,7 +122,7 @@
       radial-gradient(at 82% 88%, oklch(0.2 0.05 20 / 0.45) 0px, transparent 55%),
       radial-gradient(at 50% 50%, oklch(0.12 0.008 40 / 0.8) 0px, transparent 70%);
     background-attachment: fixed;
-    min-height: 100dvh;
+    height: 100%;
   }
 
   h1, h2, h3, h4, h5, h6, .font-display {
@@ -143,43 +149,8 @@
     inset 0 1px 0 oklch(1 0 0 / 0.07);
 }
 
-/* App chrome (top/bottom nav, FAB) is pinned with plain `position: fixed`.
-   In standalone PWA mode this anchors to the viewport and stays rock-steady
-   during scroll — no per-frame transform, so no repaint jitter on the blurred
-   `glass` bars.
-
-   The one dynamic case is the on-screen keyboard. Rather than floating the
-   bottom chrome up above the keyboard (which read as "offset" and jittered),
-   we slide it cleanly off-screen while typing via `[data-keyboard-open]`
-   (set by `useVisualViewportVars`). On Android the layout viewport already
-   shrinks (`interactive-widget=resizes-content`), so the keyboard flag never
-   fires there and the bars simply rest above the keyboard. */
-.app-top-nav {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-}
-.app-bottom-nav {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  transition: transform 0.25s cubic-bezier(0.32, 0.72, 0, 1);
-  will-change: transform;
-}
-.app-fab {
-  transition:
-    opacity 0.2s ease,
-    transform 0.25s cubic-bezier(0.32, 0.72, 0, 1);
-}
-:root[data-keyboard-open] .app-bottom-nav {
-  transform: translate3d(0, calc(100% + env(safe-area-inset-bottom) + 1rem), 0);
-  pointer-events: none;
-}
-:root[data-keyboard-open] .app-fab {
-  opacity: 0;
-  transform: translate3d(0, 1rem, 0);
-  pointer-events: none;
-}
+/* Top/bottom nav are flex siblings of the scroller inside AppFrame (not
+   position: fixed), so they need no special positioning here. The FAB and the
+   md+ SideNav remain position: fixed overlays — fine, because the locked body
+   never scrolls them out from under the keyboard. */
 

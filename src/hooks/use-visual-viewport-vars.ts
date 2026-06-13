@@ -1,57 +1,51 @@
 import { useEffect } from "react";
 
 /**
- * Publishes `--vv-top` and `--vv-bottom` CSS variables on <html>, driven by
- * `window.visualViewport`. App chrome (top/bottom nav) uses these to stay
- * pinned to the visible region on iOS Safari — surviving keyboard, URL-bar
- * collapse, pull-to-refresh, and rubber-band scroll.
+ * Flips `data-keyboard-open` on <html> when the on-screen keyboard is up,
+ * driven by `window.visualViewport`. App chrome (bottom nav + FAB) uses it to
+ * slide out of the way while typing instead of floating above the keyboard.
  *
- * Also flips `data-keyboard-open` so consumers can opt out of certain
- * behaviours while typing.
- *
- * Mount once at the app root.
+ * Deliberately minimal: it does NOT react to scroll and only touches the DOM
+ * when the keyboard state actually changes — so it never repaints the blurred
+ * chrome during momentum scroll (the old per-frame CSS-var writes caused that
+ * jitter). Mount once at the app root.
  */
 export function useVisualViewportVars() {
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const root = document.documentElement;
     const vv = window.visualViewport;
+    if (!vv) return;
+    const root = document.documentElement;
 
     let frame = 0;
+    let open = false;
+
     const apply = () => {
       frame = 0;
-      const offsetTop = vv?.offsetTop ?? 0;
-      const vh = vv?.height ?? window.innerHeight;
-      const bottomInset = Math.max(0, window.innerHeight - vh - offsetTop);
-      root.style.setProperty("--vv-top", `${offsetTop}px`);
-      root.style.setProperty("--vv-bottom", `${bottomInset}px`);
-      if (bottomInset > 120) root.setAttribute("data-keyboard-open", "true");
+      // How much the visible viewport has shrunk vs. the layout viewport — i.e.
+      // the keyboard height on iOS (where the keyboard overlays rather than
+      // resizing the page). 120px clears non-keyboard noise (accessory bars).
+      const bottomInset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      const next = bottomInset > 120;
+      if (next === open) return;
+      open = next;
+      if (open) root.setAttribute("data-keyboard-open", "true");
       else root.removeAttribute("data-keyboard-open");
     };
+
     const schedule = () => {
       if (frame) return;
       frame = window.requestAnimationFrame(apply);
     };
 
     apply();
-
-    if (vv) {
-      vv.addEventListener("resize", schedule);
-      vv.addEventListener("scroll", schedule);
-    }
-    window.addEventListener("resize", schedule);
+    vv.addEventListener("resize", schedule);
     window.addEventListener("orientationchange", schedule);
 
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
-      if (vv) {
-        vv.removeEventListener("resize", schedule);
-        vv.removeEventListener("scroll", schedule);
-      }
-      window.removeEventListener("resize", schedule);
+      vv.removeEventListener("resize", schedule);
       window.removeEventListener("orientationchange", schedule);
-      root.style.removeProperty("--vv-top");
-      root.style.removeProperty("--vv-bottom");
       root.removeAttribute("data-keyboard-open");
     };
   }, []);

@@ -38,7 +38,7 @@ export function Fab() {
   return (
     <>
       <div
-        className="fixed right-5 z-40 md:hidden flex flex-col items-end"
+        className="app-fab fixed right-5 z-40 md:hidden flex flex-col items-end"
         style={{ bottom: "calc(env(safe-area-inset-bottom) + 6.5rem)" }}
       >
         <AnimatePresence>

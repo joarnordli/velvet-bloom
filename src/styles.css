@@ -1,0 +1,177 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-display: "Marcellus", serif;
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-online: var(--online);
+  --color-chat-me: var(--chat-me);
+  --color-chat-me-foreground: var(--chat-me-foreground);
+  --color-espresso: var(--espresso);
+}
+
+:root {
+  --radius: 0.875rem;
+
+  /* Premium dark espresso palette */
+  --background: oklch(0.14 0.012 40);
+  --foreground: oklch(0.96 0.005 80);
+
+  --card: oklch(0.17 0.014 40);
+  --card-foreground: oklch(0.96 0.005 80);
+
+  --popover: oklch(0.16 0.014 40);
+  --popover-foreground: oklch(0.96 0.005 80);
+
+  --primary: oklch(0.92 0.02 80);
+  --primary-foreground: oklch(0.14 0.012 40);
+
+  --secondary: oklch(0.22 0.015 40);
+  --secondary-foreground: oklch(0.96 0.005 80);
+
+  --muted: oklch(0.22 0.012 40);
+  --muted-foreground: oklch(0.68 0.012 70);
+
+  --accent: oklch(0.55 0.18 25);
+  --accent-foreground: oklch(0.98 0.005 80);
+
+  --destructive: oklch(0.6 0.22 25);
+  --destructive-foreground: oklch(0.98 0.005 80);
+
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 10%);
+  --ring: oklch(0.55 0.18 25 / 60%);
+
+  --online: oklch(0.74 0.17 145);
+  --chat-me: oklch(0.52 0.16 38);
+  --chat-me-foreground: oklch(0.98 0.01 80);
+  --espresso: oklch(0.18 0.018 40);
+
+  /* Notification accent — matches chat bubble warm red-orange */
+  --color-notif-dot: oklch(0.62 0.2 32);
+  --color-notif-tint: oklch(0.62 0.2 32 / 0.08);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html, body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+    overscroll-behavior-y: none;
+    touch-action: pan-x pan-y;
+  }
+
+  /* iOS Safari auto-zooms when a focused form control has font-size < 16px,
+     which then pans the page and visually shifts fixed chrome. Enforce a
+     16px minimum without overriding larger, intentional sizes. */
+  input, textarea, select {
+    font-size: max(16px, 1rem);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    background-image:
+      radial-gradient(at 18% 12%, oklch(0.22 0.04 30 / 0.55) 0px, transparent 55%),
+      radial-gradient(at 82% 88%, oklch(0.2 0.05 20 / 0.45) 0px, transparent 55%),
+      radial-gradient(at 50% 50%, oklch(0.12 0.008 40 / 0.8) 0px, transparent 70%);
+    background-attachment: fixed;
+    min-height: 100dvh;
+  }
+
+  h1, h2, h3, h4, h5, h6, .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+}
+
+@utility glass {
+  background-color: oklch(1 0 0 / 0.04);
+  backdrop-filter: blur(28px) saturate(140%);
+  border: 1px solid oklch(1 0 0 / 0.08);
+  box-shadow:
+    0 20px 50px -20px oklch(0 0 0 / 0.6),
+    inset 0 1px 0 oklch(1 0 0 / 0.06);
+}
+
+@utility glass-strong {
+  background-color: oklch(0.16 0.014 40 / 0.7);
+  backdrop-filter: blur(36px) saturate(160%);
+  border: 1px solid oklch(1 0 0 / 0.1);
+  box-shadow:
+    0 30px 80px -30px oklch(0 0 0 / 0.75),
+    inset 0 1px 0 oklch(1 0 0 / 0.07);
+}
+
+/* Pin app chrome to the visual viewport (not the layout viewport). On iOS
+   Safari, plain `position: fixed` drifts during scroll, keyboard open, and
+   pull-to-refresh because it anchors to the layout viewport. We compensate
+   with a transform driven by `--vv-top` / `--vv-bottom`, written by
+   `useVisualViewportVars`. Defaults of 0px keep desktop and SSR identical. */
+:root {
+  --vv-top: 0px;
+  --vv-bottom: 0px;
+}
+.app-top-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  transform: translate3d(0, var(--vv-top, 0px), 0);
+  will-change: transform;
+}
+.app-bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  /* Android Chromium exposes `keyboard-inset-height` natively when the
+     viewport meta uses `interactive-widget=resizes-content`. iOS Safari
+     does not, so the JS visual-viewport shim writes `--vv-bottom` for
+     that path. The two never both fire on the same device, so they
+     compose without double-offset. */
+  margin-bottom: env(keyboard-inset-height, 0px);
+  transform: translate3d(0, calc(var(--vv-bottom, 0px) * -1), 0);
+  will-change: transform;
+}
+

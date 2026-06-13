@@ -390,7 +390,7 @@ export const searchAll = createServerFn({ method: "POST" })
       const [usersRes, postsRes] = await Promise.all([
         supabase
           .from("profiles")
-          .select("id, username, bio, avatar_path")
+          .select("id, username, avatar_path")
           .ilike("username", `%${safe}%`)
           .neq("id", userId)
           .order("username", { ascending: true })
@@ -421,10 +421,24 @@ export const searchAll = createServerFn({ method: "POST" })
           if (item.path && item.signedUrl) signed[item.path] = item.signedUrl;
         }
       }
+
+      // Bio is privacy-gated: fetch it through get_profile_card so private
+      // accounts surface in discovery by username/avatar but never leak their
+      // bio to non-followers. (≤5 hits.)
+      const bioByUser = new Map<string, string | null>();
+      await Promise.all(
+        userRows.map(async (u) => {
+          const { data: card } = await supabase.rpc("get_profile_card", {
+            _target: u.id,
+          });
+          bioByUser.set(u.id, card?.[0]?.bio ?? null);
+        }),
+      );
+
       const users: UserHit[] = userRows.map((u) => ({
         id: u.id,
         username: u.username,
-        bio: u.bio,
+        bio: bioByUser.get(u.id) ?? null,
         avatar_url: u.avatar_path ? (signed[u.avatar_path] ?? null) : null,
       }));
 
@@ -469,14 +483,13 @@ export const getMyProfile = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<MyProfile | null> => {
     const { supabase, userId } = context;
-    const { data, error } = await supabase
-      .from("profiles")
-      .select(
-        "id, username, region, gender, situation, looking_for, orientation, bio, kinks, avatar_path, created_at",
-      )
-      .eq("id", userId)
-      .maybeSingle();
+    // Sensitive columns are no longer directly SELECTable; the gated RPC
+    // returns full details for self (can_view is always true here).
+    const { data: cardRows, error } = await supabase.rpc("get_profile_card", {
+      _target: userId,
+    });
     if (error) throw new Error(error.message);
+    const data = cardRows?.[0];
     if (!data) return null;
     const [followers, following] = await Promise.all([
       supabase

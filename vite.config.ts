@@ -12,4 +12,8 @@ export default defineConfig({
     // nitro/vite builds from this
     server: { entry: "server" },
   },
+  // Hard-pin the Nitro target to Vercel so `npm run build` emits Vercel's
+  // Build Output API format (.vercel/output) that Vercel consumes zero-config.
+  // Inside a Lovable build this override is ignored (forced to Cloudflare there).
+  nitro: { preset: "vercel" },
 });

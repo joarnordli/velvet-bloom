@@ -45,18 +45,18 @@ export const getUserProfileByUsername = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => usernameInput.parse(data))
   .handler(async ({ data, context }): Promise<PublicProfile> => {
     const { supabase, userId } = context;
+    // Identity is readable by username; sensitive detail columns are not —
+    // they come from the privacy-gated get_profile_card RPC below.
     const { data: row, error } = await supabase
       .from("profiles")
-      .select(
-        "id, username, region, gender, situation, looking_for, orientation, bio, kinks, avatar_path",
-      )
+      .select("id, username, avatar_path")
       .eq("username", data.username)
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!row) throw notFound();
 
     const isMe = row.id === userId;
-    const [followers, following, mine, privacy, request] = await Promise.all([
+    const [followers, following, mine, privacy, request, cardRes] = await Promise.all([
       supabase
         .from("follows")
         .select("follower_id", { count: "exact", head: true })
@@ -83,8 +83,10 @@ export const getUserProfileByUsername = createServerFn({ method: "POST" })
             .eq("requester_id", userId)
             .eq("target_id", row.id)
             .maybeSingle(),
+      supabase.rpc("get_profile_card", { _target: row.id }),
     ]);
 
+    const card = cardRes.data?.[0] ?? null;
     const isFollowing = !isMe && !!mine.data;
     const hasRequested = !isMe && !!request.data;
     const isPrivate = !!(privacy.data as boolean | null);
@@ -105,13 +107,13 @@ export const getUserProfileByUsername = createServerFn({ method: "POST" })
     return {
       id: row.id,
       username: row.username,
-      region: row.region,
-      gender: row.gender,
-      situation: row.situation,
-      looking_for: row.looking_for,
-      orientation: row.orientation,
-      bio: row.bio,
-      kinks: row.kinks ?? [],
+      region: card?.region ?? null,
+      gender: card?.gender ?? null,
+      situation: card?.situation ?? null,
+      looking_for: card?.looking_for ?? null,
+      orientation: card?.orientation ?? null,
+      bio: card?.bio ?? null,
+      kinks: card?.kinks ?? [],
       avatar_url: await signAvatar(supabase, row.avatar_path),
       isMe,
       isPrivate,

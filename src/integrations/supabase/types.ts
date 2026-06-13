@@ -487,6 +487,23 @@ export type Database = {
           user_id: string
         }[]
       }
+      get_profile_card: {
+        Args: { _target: string }
+        Returns: {
+          id: string
+          username: string
+          avatar_path: string | null
+          created_at: string
+          region: string | null
+          gender: string | null
+          situation: string | null
+          looking_for: string | null
+          orientation: string | null
+          bio: string | null
+          kinks: string[]
+          can_view: boolean
+        }[]
+      }
       is_account_private: { Args: { _user: string }; Returns: boolean }
       is_conversation_member: {
         Args: { _conversation_id: string; _user_id: string }

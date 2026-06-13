@@ -19,6 +19,7 @@ export function RouteTransitions({ children }: { children: ReactNode }) {
   const reduce = useReducedMotion();
 
   const prevPathRef = useRef(pathname);
+  const layerRef = useRef<HTMLDivElement>(null);
   const [phase, setPhase] = useState<Phase>("tab");
 
   useEffect(() => {
@@ -50,17 +51,21 @@ export function RouteTransitions({ children }: { children: ReactNode }) {
   return (
     <motion.div
       key={pathname}
+      ref={layerRef}
       initial={initial}
       animate={{ x: 0, opacity: 1, y: 0 }}
       transition={transition}
       onAnimationComplete={() => {
-        const el = document.querySelector<HTMLElement>(`[data-route-anim="${pathname}"]`);
+        // Release the compositing hints once settled so any `position: fixed`
+        // descendants (modals, drawers) anchor to the viewport again. Targeted
+        // via ref rather than a pathname data-attribute — that attribute was the
+        // sole SSR/client hydration mismatch (server "/" vs client redirect).
+        const el = layerRef.current;
         if (el) {
           el.style.transform = "none";
           el.style.willChange = "auto";
         }
       }}
-      data-route-anim={pathname}
       data-route-layer
       style={{ willChange: "transform, opacity" }}
     >

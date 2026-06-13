@@ -6,5 +6,9 @@ import type { ReactNode } from "react";
  * adds page padding so route content breathes inside the scroller.
  */
 export function AppShell({ children }: { children: ReactNode }) {
-  return <div className="pt-2 pb-12 md:pt-6 md:pr-4">{children}</div>;
+  return (
+    <div className="pt-2 pb-[calc(5rem+env(safe-area-inset-bottom))] md:pt-6 md:pr-4 md:pb-10">
+      {children}
+    </div>
+  );
 }

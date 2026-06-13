@@ -62,7 +62,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
   return (
     <>
       <SideNav />
-      <div className="flex h-[100dvh] flex-col md:pl-[17rem]">
+      <div className="relative flex h-[100dvh] flex-col md:pl-[17rem]">
         <TopNav />
         <main
           ref={mainRef}
@@ -70,6 +70,9 @@ export function AppFrame({ children }: { children: ReactNode }) {
         >
           {children}
         </main>
+        {/* Floats over the bottom of the scroller (content passes behind the
+            glass pill) but stays immovable — it's absolute inside the locked,
+            non-scrolling shell, not fixed to the viewport. */}
         <BottomNav />
       </div>
       <Fab />

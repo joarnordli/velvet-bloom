@@ -63,20 +63,23 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
       }
     );
 
-    const { data, error } = await supabase.auth.getClaims(token);
-    if (error || !data?.claims) {
-      throw new Error('Unauthorized: Invalid token');
-    }
-
-    if (!data.claims.sub) {
-      throw new Error('Unauthorized: No user ID found in token');
+    // Validate with getUser(): it checks the token against the Supabase auth
+    // server, which works for both the legacy HS256 shared secret and the new
+    // asymmetric JWT signing keys. getClaims() does local JWKS verification that
+    // fails against this project's signing-key configuration. The underlying
+    // error message is surfaced to make future auth issues diagnosable.
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data?.user) {
+      throw new Error(
+        `Unauthorized: Invalid token${error ? ` (${error.message})` : ''}`,
+      );
     }
 
     return next({
       context: {
         supabase,
-        userId: data.claims.sub,
-        claims: data.claims,
+        userId: data.user.id,
+        claims: data.user,
       },
     });
   },

@@ -1,12 +1,10 @@
 import { Eye, EyeOff, Bell, User } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { useDiscreetMode } from "@/context/discreet-mode";
-import { useOnlinePresence } from "@/hooks/use-online-presence";
 import { useUnreadCounts } from "@/hooks/use-unread-counts";
 
 export function TopNav() {
   const { discreet, toggle } = useDiscreetMode();
-  const online = useOnlinePresence();
   const { notifications: notifCount } = useUnreadCounts();
   return (
     <header className="shrink-0 md:hidden bg-background border-b border-white/5 pt-[env(safe-area-inset-top)]">
@@ -16,13 +14,6 @@ export function TopNav() {
             <h1 className="font-display text-4xl leading-none tracking-tight text-foreground">
               mittpunkt
             </h1>
-            <div className="mt-2 flex items-center gap-2">
-              <span className="relative inline-flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--color-online)] opacity-60 animate-ping" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--color-online)]" />
-              </span>
-              <span className="text-xs text-muted-foreground">{online} pålogget</span>
-            </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">

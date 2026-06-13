@@ -19,7 +19,6 @@ import { useDiscreetMode } from "@/context/discreet-mode";
 import { WritePostModal } from "./WritePostModal";
 import { MediaComposerModal } from "./MediaComposerModal";
 import { usePostComposer } from "./usePostComposer";
-import { useOnlinePresence } from "@/hooks/use-online-presence";
 
 const navItems = [
   { key: "home", label: "Hjem", icon: Home, to: "/" as const },
@@ -34,19 +33,11 @@ export function SideNav() {
   const { discreet, toggle } = useDiscreetMode();
   const [composerOpen, setComposerOpen] = useState(false);
   const c = usePostComposer();
-  const online = useOnlinePresence();
 
   return (
     <aside className="hidden md:flex fixed left-4 top-4 bottom-4 z-40 w-60 flex-col glass-strong rounded-[2rem] overflow-hidden">
       <div className="px-6 pt-6">
         <h1 className="font-display text-3xl leading-none tracking-tight">mittpunkt</h1>
-        <div className="mt-3 flex items-center gap-2">
-          <span className="relative inline-flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--color-online)] opacity-60 animate-ping" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--color-online)]" />
-          </span>
-          <span className="text-xs text-muted-foreground">{online} pålogget</span>
-        </div>
       </div>
 
       <nav className="mt-6 px-3 flex-1 overflow-y-auto">

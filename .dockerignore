@@ -15,6 +15,7 @@ dist
 *.log
 bun.lock
 docs
-drizzle
 supabase
 README*.md
+# NOTE: do NOT ignore `drizzle/` — the Dockerfile copies it into the image so
+# migrate.mjs can apply migrations at container start.

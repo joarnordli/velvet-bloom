@@ -2,7 +2,6 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
   follows,
-  postComments,
   postLikes,
   posts,
   profiles,
@@ -26,6 +25,9 @@ export type PostRow = {
   createdAt: Date;
   authorId: string;
   repostOf: string | null;
+  likeCount: number;
+  commentCount: number;
+  repostCount: number;
 };
 
 export const POST_COLUMNS = {
@@ -35,6 +37,9 @@ export const POST_COLUMNS = {
   createdAt: posts.createdAt,
   authorId: posts.authorId,
   repostOf: posts.repostOf,
+  likeCount: posts.likeCount,
+  commentCount: posts.commentCount,
+  repostCount: posts.repostCount,
 } as const;
 
 /**
@@ -83,10 +88,7 @@ export async function mapPostRows(userId: string, rows: PostRow[]): Promise<Feed
 
   const [
     profilesData,
-    likesData,
     myLikesData,
-    commentsData,
-    repostsData,
     myRepostsData,
     privacyData,
     iFollowData,
@@ -96,16 +98,13 @@ export async function mapPostRows(userId: string, rows: PostRow[]): Promise<Feed
       .select({ id: profiles.id, username: profiles.username, avatarPath: profiles.avatarPath })
       .from(profiles)
       .where(inArray(profiles.id, authorIds)),
-    db.select({ postId: postLikes.postId }).from(postLikes).where(inArray(postLikes.postId, effectiveIds)),
+    // Viewer's own like/repost flags only (small, bounded by the page). The
+    // total counts come from the denormalized columns on posts (below) — no
+    // more fetch-all-rows-and-tally.
     db
       .select({ postId: postLikes.postId })
       .from(postLikes)
       .where(and(inArray(postLikes.postId, effectiveIds), eq(postLikes.userId, userId))),
-    db
-      .select({ postId: postComments.postId })
-      .from(postComments)
-      .where(inArray(postComments.postId, effectiveIds)),
-    db.select({ repostOf: posts.repostOf }).from(posts).where(inArray(posts.repostOf, effectiveIds)),
     db
       .select({ repostOf: posts.repostOf })
       .from(posts)
@@ -149,15 +148,17 @@ export async function mapPostRows(userId: string, rows: PostRow[]): Promise<Feed
   const iFollow = new Set(iFollowData.map((r) => r.followingId));
   const followsMe = new Set(followsMeData.map((r) => r.followerId));
 
-  const likeCounts: Record<string, number> = {};
-  for (const r of likesData) likeCounts[r.postId] = (likeCounts[r.postId] ?? 0) + 1;
+  // Counts come straight from the denormalized columns on the effective post
+  // (a row's own counters, or its original's for reposts).
+  const countById = new Map<string, { like: number; comment: number; repost: number }>();
+  for (const r of [...rows, ...originals]) {
+    countById.set(r.id, {
+      like: r.likeCount,
+      comment: r.commentCount,
+      repost: r.repostCount,
+    });
+  }
   const likedByMe = new Set(myLikesData.map((r) => r.postId));
-
-  const commentCounts: Record<string, number> = {};
-  for (const r of commentsData) commentCounts[r.postId] = (commentCounts[r.postId] ?? 0) + 1;
-
-  const repostCounts: Record<string, number> = {};
-  for (const r of repostsData) if (r.repostOf) repostCounts[r.repostOf] = (repostCounts[r.repostOf] ?? 0) + 1;
   const repostedByMe = new Set(
     myRepostsData.map((r) => r.repostOf).filter((v): v is string => !!v),
   );
@@ -218,10 +219,10 @@ export async function mapPostRows(userId: string, rows: PostRow[]): Promise<Feed
         username: usernames[r.authorId] ?? "ukjent",
         avatarUrl: ap ? signedAvatars[ap] ?? null : null,
       },
-      likeCount: likeCounts[effId] ?? 0,
-      commentCount: commentCounts[effId] ?? 0,
+      likeCount: countById.get(effId)?.like ?? 0,
+      commentCount: countById.get(effId)?.comment ?? 0,
       likedByMe: likedByMe.has(effId),
-      repostCount: repostCounts[effId] ?? 0,
+      repostCount: countById.get(effId)?.repost ?? 0,
       repostedByMe: repostedByMe.has(effId),
       repostOf,
       mine: r.authorId === userId,

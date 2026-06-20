@@ -7,7 +7,7 @@ import { followRequests, follows, posts, profiles } from "@/db/schema";
 import { requireAuth } from "./auth-middleware";
 import { canViewProfile, isAccountPrivate } from "./authz.server";
 import { presignDownload } from "./storage.server";
-import { mapPostRows } from "./post-hydrate.server";
+import { mapPostRows, POST_COLUMNS } from "./post-hydrate.server";
 import type { FeedPost } from "@/lib/posts.functions";
 
 export type PublicProfile = {
@@ -163,14 +163,7 @@ export const getUserPostsByUsername = createServerFn({ method: "POST" })
     if (!(await canViewProfile(userId, prof[0].id))) return [];
 
     const rows = await db
-      .select({
-        id: posts.id,
-        body: posts.body,
-        imagePath: posts.imagePath,
-        createdAt: posts.createdAt,
-        authorId: posts.authorId,
-        repostOf: posts.repostOf,
-      })
+      .select(POST_COLUMNS)
       .from(posts)
       .where(eq(posts.authorId, prof[0].id))
       .orderBy(desc(posts.createdAt))

@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { postComments, posts, profiles } from "@/db/schema";
@@ -86,6 +86,10 @@ export const addComment = createServerFn({ method: "POST" })
       .insert(postComments)
       .values({ postId: data.postId, authorId: userId, body: data.body })
       .returning({ id: postComments.id });
+    await db
+      .update(posts)
+      .set({ commentCount: sql`${posts.commentCount} + 1` })
+      .where(eq(posts.id, data.postId));
     await notifyComment(data.postId, row.id, userId, data.body);
     return { ok: true };
   });
@@ -97,8 +101,15 @@ export const deleteComment = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => deleteInput.parse(data))
   .handler(async ({ data, context }) => {
     const { userId } = context;
-    await db
+    const removed = await db
       .delete(postComments)
-      .where(and(eq(postComments.id, data.commentId), eq(postComments.authorId, userId)));
+      .where(and(eq(postComments.id, data.commentId), eq(postComments.authorId, userId)))
+      .returning({ postId: postComments.postId });
+    if (removed.length) {
+      await db
+        .update(posts)
+        .set({ commentCount: sql`GREATEST(${posts.commentCount} - 1, 0)` })
+        .where(eq(posts.id, removed[0].postId));
+    }
     return { ok: true };
   });

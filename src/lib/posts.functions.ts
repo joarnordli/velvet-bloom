@@ -340,7 +340,12 @@ export const deletePost = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { userId } = context;
     const rows = await db
-      .select({ id: posts.id, authorId: posts.authorId, imagePath: posts.imagePath })
+      .select({
+        id: posts.id,
+        authorId: posts.authorId,
+        imagePath: posts.imagePath,
+        repostOf: posts.repostOf,
+      })
       .from(posts)
       .where(eq(posts.id, data.postId))
       .limit(1);
@@ -358,6 +363,16 @@ export const deletePost = createServerFn({ method: "POST" })
     }
 
     await db.delete(posts).where(and(eq(posts.id, data.postId), eq(posts.authorId, userId)));
+
+    // Deleting a repost decrements the original's repostCount. (Deleting an
+    // original instead nulls reposts' repost_of via the FK, so its own counters
+    // simply vanish with the row.)
+    if (row.repostOf) {
+      await db
+        .update(posts)
+        .set({ repostCount: sql`GREATEST(${posts.repostCount} - 1, 0)` })
+        .where(eq(posts.id, row.repostOf));
+    }
     return { ok: true };
   });
 

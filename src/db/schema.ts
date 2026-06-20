@@ -143,6 +143,13 @@ export const posts = pgTable(
     repostOf: uuid("repost_of").references((): AnyPgColumn => posts.id, {
       onDelete: "set null",
     }),
+    // Denormalized engagement counters, maintained atomically by the
+    // like/comment/repost mutations (see *.functions.ts). Avoid the O(rows)
+    // count-by-fetch in mapPostRows. Counts live on the canonical/original post;
+    // reposts read their original's counters.
+    likeCount: integer("like_count").notNull().default(0),
+    commentCount: integer("comment_count").notNull().default(0),
+    repostCount: integer("repost_count").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

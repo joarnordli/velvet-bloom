@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { posts } from "@/db/schema";
@@ -65,6 +65,10 @@ export const repostPost = createServerFn({ method: "POST" })
       .insert(posts)
       .values({ authorId: userId, body: caption, imagePath: null, repostOf: originalId })
       .returning({ id: posts.id });
+    await db
+      .update(posts)
+      .set({ repostCount: sql`${posts.repostCount} + 1` })
+      .where(eq(posts.id, originalId));
     await notifyRepost(originalId, userId, caption);
     return { ok: true, id: inserted.id };
   });
@@ -94,5 +98,11 @@ export const undoRepost = createServerFn({ method: "POST" })
         ),
       )
       .returning({ id: posts.id });
+    if (deleted.length) {
+      await db
+        .update(posts)
+        .set({ repostCount: sql`GREATEST(${posts.repostCount} - ${deleted.length}, 0)` })
+        .where(eq(posts.id, originalId));
+    }
     return { ok: true, removed: deleted.length };
   });

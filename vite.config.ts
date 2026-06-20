@@ -1,19 +1,31 @@
-// @lovable.dev/vite-tanstack-config already includes the following — do NOT add them manually
-// or the app will break with duplicate plugins:
-//   - tanstackStart, viteReact, tailwindcss, tsConfigPaths, nitro (build-only using cloudflare as a default target),
-//     componentTagger (dev-only), VITE_* env injection, @ path alias, React/TanStack dedupe,
-//     error logger plugins, and sandbox detection (port/host/strictPort).
-// You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
-import { defineConfig } from "@lovable.dev/vite-tanstack-config";
+import { defineConfig } from "vite";
+import tsConfigPaths from "vite-tsconfig-paths";
+import tailwindcss from "@tailwindcss/vite";
+import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+import viteReact from "@vitejs/plugin-react";
 
+/**
+ * Standard Vite + TanStack Start config (de-Lovable'd).
+ *
+ * Replaces `@lovable.dev/vite-tanstack-config`, which bundled these same plugins
+ * but overrode Nitro's preset to cloudflare/vercel. With a plain build, Nitro
+ * defaults to `node-server` (`.output/server/index.mjs`) — what the Coolify
+ * container runs. The SSR error wrapper at `src/server.ts` is picked up by
+ * TanStack Start's convention.
+ */
 export default defineConfig({
-  tanstackStart: {
-    // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
-    // nitro/vite builds from this
-    server: { entry: "server" },
+  server: {
+    port: 8080,
+    host: true,
   },
-  // Hard-pin the Nitro target to Vercel so `npm run build` emits Vercel's
-  // Build Output API format (.vercel/output) that Vercel consumes zero-config.
-  // Inside a Lovable build this override is ignored (forced to Cloudflare there).
-  nitro: { preset: "vercel" },
+  resolve: {
+    // Avoid duplicate React / Query copies in the bundle.
+    dedupe: ["react", "react-dom", "@tanstack/react-query"],
+  },
+  plugins: [
+    tsConfigPaths({ projects: ["./tsconfig.json"] }),
+    tailwindcss(),
+    tanstackStart(),
+    viteReact(),
+  ],
 });

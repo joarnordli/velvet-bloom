@@ -1,6 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { db } from "@/db";
+import { posts } from "@/db/schema";
+import { requireAuth } from "./auth-middleware";
+import { canEngage } from "./authz.server";
+import { notifyRepost } from "./notify.server";
 
 const repostInput = z.object({
   postId: z.string().uuid(),
@@ -13,46 +18,54 @@ const repostInput = z.object({
  * per user (one undo-able repost per post).
  */
 export const repostPost = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireAuth])
   .inputValidator((data: unknown) => repostInput.parse(data))
   .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
+    const { userId } = context;
 
     // Resolve the canonical original: never repost a repost.
-    const { data: target, error: targetErr } = await supabase
-      .from("posts")
-      .select("id, repost_of")
-      .eq("id", data.postId)
-      .maybeSingle();
-    if (targetErr) throw new Error(targetErr.message);
-    if (!target) throw new Error("Post not found");
-    const originalId = target.repost_of ?? target.id;
+    const target = await db
+      .select({ id: posts.id, repostOf: posts.repostOf, authorId: posts.authorId })
+      .from(posts)
+      .where(eq(posts.id, data.postId))
+      .limit(1);
+    if (!target.length) throw new Error("Post not found");
+    const originalId = target[0].repostOf ?? target[0].id;
+
+    // Engagement gate against the original author (old RLS WITH CHECK).
+    const original = await db
+      .select({ authorId: posts.authorId })
+      .from(posts)
+      .where(eq(posts.id, originalId))
+      .limit(1);
+    const originalAuthor = original[0]?.authorId;
+    if (originalAuthor && !(await canEngage(userId, originalAuthor))) {
+      throw new Error("Du kan ikke reposte denne posten.");
+    }
 
     const caption = (data.caption ?? "").trim();
 
     if (!caption) {
       // De-dupe plain repost — one per user per original.
-      const { data: existing } = await supabase
-        .from("posts")
-        .select("id")
-        .eq("author_id", userId)
-        .eq("repost_of", originalId)
-        .eq("body", "")
-        .maybeSingle();
-      if (existing) return { ok: true, id: existing.id };
+      const existing = await db
+        .select({ id: posts.id })
+        .from(posts)
+        .where(
+          and(
+            eq(posts.authorId, userId),
+            eq(posts.repostOf, originalId),
+            eq(posts.body, ""),
+          ),
+        )
+        .limit(1);
+      if (existing.length) return { ok: true, id: existing[0].id };
     }
 
-    const { data: inserted, error } = await supabase
-      .from("posts")
-      .insert({
-        author_id: userId,
-        body: caption,
-        image_path: null,
-        repost_of: originalId,
-      })
-      .select("id")
-      .single();
-    if (error) throw new Error(error.message);
+    const [inserted] = await db
+      .insert(posts)
+      .values({ authorId: userId, body: caption, imagePath: null, repostOf: originalId })
+      .returning({ id: posts.id });
+    await notifyRepost(originalId, userId, caption);
     return { ok: true, id: inserted.id };
   });
 
@@ -60,24 +73,26 @@ const undoInput = z.object({ postId: z.string().uuid() });
 
 /** Remove the current user's plain repost of a given post. */
 export const undoRepost = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireAuth])
   .inputValidator((data: unknown) => undoInput.parse(data))
   .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
-    const { data: target } = await supabase
-      .from("posts")
-      .select("id, repost_of")
-      .eq("id", data.postId)
-      .maybeSingle();
-    if (!target) return { ok: true, removed: 0 };
-    const originalId = target.repost_of ?? target.id;
-    const { data: deleted, error } = await supabase
-      .from("posts")
-      .delete()
-      .eq("author_id", userId)
-      .eq("repost_of", originalId)
-      .eq("body", "")
-      .select("id");
-    if (error) throw new Error(error.message);
-    return { ok: true, removed: deleted?.length ?? 0 };
+    const { userId } = context;
+    const target = await db
+      .select({ id: posts.id, repostOf: posts.repostOf })
+      .from(posts)
+      .where(eq(posts.id, data.postId))
+      .limit(1);
+    if (!target.length) return { ok: true, removed: 0 };
+    const originalId = target[0].repostOf ?? target[0].id;
+    const deleted = await db
+      .delete(posts)
+      .where(
+        and(
+          eq(posts.authorId, userId),
+          eq(posts.repostOf, originalId),
+          eq(posts.body, ""),
+        ),
+      )
+      .returning({ id: posts.id });
+    return { ok: true, removed: deleted.length };
   });

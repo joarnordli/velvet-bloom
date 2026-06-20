@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { z } from "zod";
-import { supabase } from "@/integrations/supabase/client";
+import { authClient } from "@/lib/auth-client";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
@@ -47,8 +47,8 @@ function AuthPage() {
 
   // Already signed in → go home
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/" });
+    authClient.getSession().then(({ data }) => {
+      if (data?.session) navigate({ to: "/" });
     });
   }, [navigate]);
 
@@ -72,20 +72,16 @@ function AuthPage() {
           return;
         }
         const { email, username, password } = parsed.data;
-        const { data, error: err } = await supabase.auth.signUp({
+        // `name` is required on the Better Auth user; we use the username for it.
+        // The `username` additional field is mirrored into profiles server-side.
+        const { error: err } = await authClient.signUp.email({
           email,
           password,
-          options: {
-            emailRedirectTo: window.location.origin,
-            data: { username },
-          },
+          name: username,
+          username,
         });
         if (err) {
-          setError(err.message);
-          return;
-        }
-        if (!data.session) {
-          setNotice("Sjekk e-posten din for å bekrefte kontoen.");
+          setError(err.message ?? "Kunne ikke opprette konto");
           return;
         }
         navigate({ to: "/" });
@@ -98,9 +94,9 @@ function AuthPage() {
           setError(parsed.error.issues[0]?.message ?? "Sjekk feltene");
           return;
         }
-        const { error: err } = await supabase.auth.signInWithPassword(parsed.data);
+        const { error: err } = await authClient.signIn.email(parsed.data);
         if (err) {
-          setError(err.message);
+          setError(err.message ?? "Innlogging feilet");
           return;
         }
         navigate({ to: "/" });

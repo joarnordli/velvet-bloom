@@ -1,12 +1,13 @@
-import { supabase } from "@/integrations/supabase/client";
 import { stripImageMetadata } from "./strip-exif";
+import { createPostMediaUpload } from "./uploads.functions";
 
 /**
  * Upload pipeline for the FAB "Last opp" and "Kamera" actions.
  *
- * Invariant: metadata is stripped client-side BEFORE the storage call.
- * If stripImageMetadata throws, the supabase.storage.upload line is never
- * reached — so original EXIF bytes never leave the device.
+ * Invariant: metadata is stripped client-side BEFORE the upload. If
+ * stripImageMetadata throws, the PUT is never reached — original EXIF bytes
+ * never leave the device. Storage is Cloudflare R2: we ask the server for a
+ * short-lived presigned PUT URL (auth-gated) and upload the sanitized blob to it.
  */
 export async function uploadPostMedia(file: File): Promise<{ path: string }> {
   // Hard gate: only images allowed. Other formats (HEIC/RAW/video) carry
@@ -18,26 +19,20 @@ export async function uploadPostMedia(file: File): Promise<{ path: string }> {
   // 1. Strip EXIF / GPS / device metadata via canvas re-encode.
   const clean = await stripImageMetadata(file);
 
-  // 2. Resolve current user (storage RLS scopes uploads to the user's folder).
-  const { data: userData, error: userErr } = await supabase.auth.getUser();
-  if (userErr || !userData.user) {
-    throw new Error("Du må være logget inn for å laste opp.");
+  // 2. Ask the server for a presigned PUT (it derives the key from the session).
+  const { key, url } = await createPostMediaUpload({
+    data: { contentType: clean.mimeType },
+  });
+
+  // 3. Upload the SANITIZED blob straight to R2 — never the original File.
+  const res = await fetch(url, {
+    method: "PUT",
+    body: clean.blob,
+    headers: { "content-type": clean.mimeType },
+  });
+  if (!res.ok) {
+    throw new Error(`Opplasting feilet (${res.status}).`);
   }
 
-  const path = `${userData.user.id}/${crypto.randomUUID()}.${clean.extension}`;
-
-  // 3. Upload the SANITIZED blob — never the original File.
-  const { error: uploadErr } = await supabase.storage
-    .from("post-media")
-    .upload(path, clean.blob, {
-      contentType: clean.mimeType,
-      upsert: false,
-      cacheControl: "3600",
-    });
-
-  if (uploadErr) {
-    throw new Error(uploadErr.message);
-  }
-
-  return { path };
+  return { path: key };
 }

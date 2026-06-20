@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/brand/AppShell";
-import { supabase } from "@/integrations/supabase/client";
+import { usePollInvalidate } from "@/hooks/use-poll-invalidate";
 import {
   listNotifications,
   markNotificationsRead,
@@ -73,32 +73,8 @@ function List() {
       .catch(() => {});
   }, [markRead, qc]);
 
-  useEffect(() => {
-    let cancelled = false;
-    let channel: ReturnType<typeof supabase.channel> | null = null;
-    supabase.auth.getUser().then(({ data }) => {
-      const uid = data.user?.id;
-      if (!uid || cancelled) return;
-      const topic = `notif-list:${uid}:${Math.random().toString(36).slice(2, 8)}`;
-      channel = supabase
-        .channel(topic)
-        .on(
-          "postgres_changes",
-          {
-            event: "INSERT",
-            schema: "public",
-            table: "notifications",
-            filter: `recipient_id=eq.${uid}`,
-          },
-          () => qc.invalidateQueries({ queryKey: ["notifications"] }),
-        )
-        .subscribe();
-    });
-    return () => {
-      cancelled = true;
-      if (channel) supabase.removeChannel(channel);
-    };
-  }, [qc]);
+  // Polling replacement for Realtime: refresh the notifications list.
+  usePollInvalidate([["notifications"]], 20000);
 
   if (!data.length) {
     return (

@@ -17,6 +17,25 @@ dist-ssr
 .vercel
 *.local
 
+# Compiled TS output (source is .ts/.tsx — never commit emitted .js/.d.ts).
+# Scoped so tracked configs (eslint.config.js, serve.mjs) are untouched.
+src/**/*.js
+src/**/*.d.ts
+src/**/*.js.map
+src/**/*.d.ts.map
+/drizzle.config.js
+/drizzle.config.d.ts
+/drizzle.config.js.map
+/drizzle.config.d.ts.map
+/vite.config.js
+/vite.config.d.ts
+/vite.config.js.map
+/vite.config.d.ts.map
+
+# Local env / secrets (keep the .env.example template tracked)
+.env
+!.env.example
+
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars

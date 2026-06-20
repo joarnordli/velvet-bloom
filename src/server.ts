@@ -40,6 +40,16 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      // Better Auth owns /api/auth/* (sign-in/up, session, 2FA). Intercept here —
+      // this fetch entry runs in both dev (Vite) and prod (serve.mjs), so the
+      // handler is mounted once for every environment. Dynamic import keeps the
+      // server-only auth/db modules out of the hot path until a request hits them.
+      const url = new URL(request.url);
+      if (url.pathname.startsWith("/api/auth")) {
+        const { auth } = await import("./lib/auth");
+        return await auth.handler(request);
+      }
+
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response);

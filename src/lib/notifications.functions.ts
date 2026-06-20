@@ -1,6 +1,17 @@
 import { createServerFn } from "@tanstack/react-start";
+import { and, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { db } from "@/db";
+import {
+  conversationParticipants,
+  conversations,
+  messages,
+  notifications,
+  posts,
+  profiles,
+} from "@/db/schema";
+import { requireAuth } from "./auth-middleware";
+import { presignDownloadMany } from "./storage.server";
 
 export type NotificationType =
   | "like"
@@ -25,89 +36,67 @@ export type NotificationItem = {
 };
 
 export const listNotifications = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireAuth])
   .handler(async ({ context }): Promise<NotificationItem[]> => {
-    const { supabase, userId } = context;
+    const { userId } = context;
 
-    const { data: rows, error } = await supabase
-      .from("notifications")
-      .select("id, type, created_at, read_at, preview, actor_id, post_id")
-      .eq("recipient_id", userId)
-      .order("created_at", { ascending: false })
+    const rows = await db
+      .select({
+        id: notifications.id,
+        type: notifications.type,
+        createdAt: notifications.createdAt,
+        readAt: notifications.readAt,
+        preview: notifications.preview,
+        actorId: notifications.actorId,
+        postId: notifications.postId,
+      })
+      .from(notifications)
+      .where(eq(notifications.recipientId, userId))
+      .orderBy(desc(notifications.createdAt))
       .limit(100);
-    if (error) throw new Error(error.message);
-    if (!rows?.length) return [];
+    if (!rows.length) return [];
 
-    const actorIds = Array.from(new Set(rows.map((r) => r.actor_id)));
-    const postIds = Array.from(
-      new Set(rows.map((r) => r.post_id).filter((v): v is string => !!v)),
-    );
+    const actorIds = Array.from(new Set(rows.map((r) => r.actorId)));
+    const postIds = Array.from(new Set(rows.map((r) => r.postId).filter((v): v is string => !!v)));
 
-    const [{ data: profiles }, { data: posts }] = await Promise.all([
-      supabase
-        .from("profiles")
-        .select("id, username, avatar_path")
-        .in("id", actorIds),
+    const [profs, postRows] = await Promise.all([
+      db
+        .select({ id: profiles.id, username: profiles.username, avatarPath: profiles.avatarPath })
+        .from(profiles)
+        .where(inArray(profiles.id, actorIds)),
       postIds.length
-        ? supabase
-            .from("posts")
-            .select("id, body, image_path")
-            .in("id", postIds)
-        : Promise.resolve({ data: [] as Array<{ id: string; body: string; image_path: string | null }> }),
+        ? db
+            .select({ id: posts.id, body: posts.body, imagePath: posts.imagePath })
+            .from(posts)
+            .where(inArray(posts.id, postIds))
+        : Promise.resolve([] as Array<{ id: string; body: string; imagePath: string | null }>),
     ]);
 
-    const avatarPaths = (profiles ?? [])
-      .map((p) => p.avatar_path)
-      .filter((p): p is string => !!p);
-    const imagePaths = (posts ?? [])
-      .map((p) => p.image_path)
-      .filter((p): p is string => !!p);
+    const signedAvatars = await presignDownloadMany(profs.map((p) => p.avatarPath));
+    const signedImages = await presignDownloadMany(postRows.map((p) => p.imagePath));
 
-    const signedAvatars: Record<string, string> = {};
-    if (avatarPaths.length) {
-      const { data } = await supabase.storage
-        .from("avatars")
-        .createSignedUrls(avatarPaths, 60 * 60);
-      for (const i of data ?? [])
-        if (i.path && i.signedUrl) signedAvatars[i.path] = i.signedUrl;
-    }
-    const signedImages: Record<string, string> = {};
-    if (imagePaths.length) {
-      const { data } = await supabase.storage
-        .from("post-media")
-        .createSignedUrls(imagePaths, 60 * 60);
-      for (const i of data ?? [])
-        if (i.path && i.signedUrl) signedImages[i.path] = i.signedUrl;
-    }
-
-    const profileById = new Map(
-      (profiles ?? []).map((p) => [p.id, p] as const),
-    );
-    const postById = new Map((posts ?? []).map((p) => [p.id, p] as const));
+    const profileById = new Map(profs.map((p) => [p.id, p] as const));
+    const postById = new Map(postRows.map((p) => [p.id, p] as const));
 
     return rows.map((r) => {
-      const prof = profileById.get(r.actor_id);
-      const post = r.post_id ? postById.get(r.post_id) : undefined;
+      const prof = profileById.get(r.actorId);
+      const post = r.postId ? postById.get(r.postId) : undefined;
       return {
         id: r.id,
         type: r.type as NotificationType,
-        createdAt: r.created_at,
-        readAt: r.read_at,
+        createdAt: r.createdAt.toISOString(),
+        readAt: r.readAt ? r.readAt.toISOString() : null,
         preview: r.preview,
         actor: {
-          id: r.actor_id,
+          id: r.actorId,
           username: prof?.username ?? "ukjent",
-          avatarUrl: prof?.avatar_path
-            ? signedAvatars[prof.avatar_path] ?? null
-            : null,
+          avatarUrl: prof?.avatarPath ? signedAvatars[prof.avatarPath] ?? null : null,
         },
         post: post
           ? {
               id: post.id,
               body: post.body,
-              imageUrl: post.image_path
-                ? signedImages[post.image_path] ?? null
-                : null,
+              imageUrl: post.imagePath ? signedImages[post.imagePath] ?? null : null,
             }
           : null,
       };
@@ -115,79 +104,82 @@ export const listNotifications = createServerFn({ method: "GET" })
   });
 
 export const getUnreadCounts = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireAuth])
   .handler(
     async ({
       context,
-    }): Promise<{
-      notifications: number;
-      messages: number;
-      messageRequests: number;
-    }> => {
-      const { supabase, userId } = context;
+    }): Promise<{ notifications: number; messages: number; messageRequests: number }> => {
+      const { userId } = context;
 
-      const { count: notifCount } = await supabase
-        .from("notifications")
-        .select("id", { count: "exact", head: true })
-        .eq("recipient_id", userId)
-        .is("read_at", null);
+      const [{ notifCount }] = await db
+        .select({ notifCount: sql<number>`count(*)::int` })
+        .from(notifications)
+        .where(and(eq(notifications.recipientId, userId), isNull(notifications.readAt)));
 
-      // Messages unread, split by whether conversation is a request
-      const { data: parts } = await supabase
-        .from("conversation_participants")
-        .select("conversation_id, last_read_at")
-        .eq("user_id", userId)
-        .is("left_at", null);
+      const parts = await db
+        .select({
+          conversationId: conversationParticipants.conversationId,
+          lastReadAt: conversationParticipants.lastReadAt,
+        })
+        .from(conversationParticipants)
+        .where(
+          and(
+            eq(conversationParticipants.userId, userId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        );
 
-      // Conversations the user is in, with request flag
-      const convIds = (parts ?? []).map((p) => p.conversation_id);
+      const convIds = parts.map((p) => p.conversationId);
       const reqByConv = new Map<string, boolean>();
       if (convIds.length) {
-        const { data: convs } = await supabase
-          .from("conversations")
-          .select("id, is_request, created_by")
-          .in("id", convIds);
-        for (const c of convs ?? []) {
-          // Treat as request only when *I* did not initiate it.
-          reqByConv.set(c.id, !!c.is_request && c.created_by !== userId);
+        const convs = await db
+          .select({
+            id: conversations.id,
+            isRequest: conversations.isRequest,
+            createdBy: conversations.createdBy,
+          })
+          .from(conversations)
+          .where(inArray(conversations.id, convIds));
+        for (const c of convs) {
+          // Treat as a request only when *I* did not initiate it.
+          reqByConv.set(c.id, !!c.isRequest && c.createdBy !== userId);
         }
       }
 
-      let messages = 0;
+      let messageCount = 0;
       let messageRequests = 0;
-      for (const p of parts ?? []) {
-        const { count } = await supabase
-          .from("messages")
-          .select("id", { count: "exact", head: true })
-          .eq("conversation_id", p.conversation_id)
-          .gt("created_at", p.last_read_at ?? new Date(0).toISOString())
-          .neq("sender_id", userId)
-          .is("deleted_at", null);
-        if (reqByConv.get(p.conversation_id)) messageRequests += count ?? 0;
-        else messages += count ?? 0;
+      for (const p of parts) {
+        const [{ count }] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(messages)
+          .where(
+            and(
+              eq(messages.conversationId, p.conversationId),
+              gt(messages.createdAt, p.lastReadAt ?? new Date(0)),
+              ne(messages.senderId, userId),
+              isNull(messages.deletedAt),
+            ),
+          );
+        if (reqByConv.get(p.conversationId)) messageRequests += count ?? 0;
+        else messageCount += count ?? 0;
       }
 
-      return {
-        notifications: notifCount ?? 0,
-        messages,
-        messageRequests,
-      };
+      return { notifications: notifCount ?? 0, messages: messageCount, messageRequests };
     },
   );
 
 const markInput = z.object({ ids: z.array(z.string().uuid()).optional() });
 
 export const markNotificationsRead = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireAuth])
   .inputValidator((data: unknown) => markInput.parse(data ?? {}))
   .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
-    const q = supabase
-      .from("notifications")
-      .update({ read_at: new Date().toISOString() })
-      .eq("recipient_id", userId)
-      .is("read_at", null);
-    const { error } = data.ids?.length ? await q.in("id", data.ids) : await q;
-    if (error) throw new Error(error.message);
+    const { userId } = context;
+    const conds = [eq(notifications.recipientId, userId), isNull(notifications.readAt)];
+    if (data.ids?.length) conds.push(inArray(notifications.id, data.ids));
+    await db
+      .update(notifications)
+      .set({ readAt: new Date() })
+      .where(and(...conds));
     return { ok: true };
   });

@@ -11,7 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { supabase } from "@/integrations/supabase/client";
+import { usePollInvalidate } from "@/hooks/use-poll-invalidate";
 import { uploadMessageImage, type UploadedMessageImage } from "@/lib/upload-message-image";
 import {
   getConversation,
@@ -167,54 +167,14 @@ function ThreadInner({ conversationId }: { conversationId: string }) {
   }, [conversationId, latestMessageId, mark, qc]);
 
 
-  // Realtime: new messages + read-receipt updates + typing broadcast
-  const broadcastRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  // Polling replacement for Realtime: refresh the open thread + read receipts.
+  // (Typing indicators required the live socket and are disabled under polling —
+  // a LISTEN/NOTIFY + WS push is the documented follow-up.)
   const [typingUsers, setTypingUsers] = useState<Record<string, number>>({});
-
-  useEffect(() => {
-    const channel = supabase
-      .channel(`conv:${conversationId}`, {
-        config: { broadcast: { self: false } },
-      })
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages",
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        () => {
-          qc.invalidateQueries({ queryKey: ["messages", conversationId] });
-          qc.invalidateQueries({ queryKey: ["conversations"] });
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "conversation_participants",
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        () => {
-          // last_read_at moved → refresh "Sett" indicator
-          qc.invalidateQueries({ queryKey: ["conversation", conversationId] });
-        },
-      )
-      .on("broadcast", { event: "typing" }, (msg) => {
-        const payload = msg.payload as { userId: string };
-        if (!payload?.userId || payload.userId === me?.id) return;
-        setTypingUsers((prev) => ({ ...prev, [payload.userId]: Date.now() }));
-      })
-      .subscribe();
-
-    broadcastRef.current = channel;
-    return () => {
-      supabase.removeChannel(channel);
-      broadcastRef.current = null;
-    };
-  }, [conversationId, qc, me?.id]);
+  usePollInvalidate(
+    [["messages", conversationId], ["conversations"], ["conversation", conversationId]],
+    4000,
+  );
 
   // Sweep stale typing indicators (>3s old)
   useEffect(() => {
@@ -320,18 +280,9 @@ function ThreadInner({ conversationId }: { conversationId: string }) {
     },
   });
 
-  // Typing broadcast — throttled to once every 1.2s while user is typing
-  const lastTypingRef = useRef(0);
-  const broadcastTyping = () => {
-    const now = Date.now();
-    if (now - lastTypingRef.current < 1200) return;
-    lastTypingRef.current = now;
-    void broadcastRef.current?.send({
-      type: "broadcast",
-      event: "typing",
-      payload: { userId: me?.id },
-    });
-  };
+  // Typing broadcast is disabled under polling (no live socket). Kept as a no-op
+  // so call sites stay unchanged until the WS push lands.
+  const broadcastTyping = () => {};
 
   const onPickFiles = async (files: FileList | null) => {
     if (!files || !files.length) return;

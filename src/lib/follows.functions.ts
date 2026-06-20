@@ -1,110 +1,75 @@
 import { createServerFn } from "@tanstack/react-start";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { db } from "@/db";
+import { followRequests, follows, profiles } from "@/db/schema";
+import { requireAuth } from "./auth-middleware";
+import { isAccountPrivate } from "./authz.server";
+import { notifySimple, unnotifyFollowRequest } from "./notify.server";
+import { presignDownloadMany } from "./storage.server";
 
 const usernameInput = z.object({ username: z.string().trim().min(1).max(60) });
 const idInput = z.object({ requesterId: z.string().uuid() });
 
-async function resolveUserId(
-  supabase: SupabaseClient,
-  username: string,
-): Promise<string | null> {
-  const { data } = await supabase
-    .from("profiles")
-    .select("id")
-    .eq("username", username)
-    .maybeSingle();
-  return (data as { id: string } | null)?.id ?? null;
+async function resolveUserId(username: string): Promise<string | null> {
+  const r = await db
+    .select({ id: profiles.id })
+    .from(profiles)
+    .where(eq(profiles.username, username))
+    .limit(1);
+  return r[0]?.id ?? null;
 }
-
-async function isPrivate(
-  supabase: SupabaseClient,
-  userId: string,
-): Promise<boolean> {
-  const { data, error } = await supabase.rpc("is_account_private", { _user: userId });
-  if (error) return false;
-  return !!data;
-}
-
 
 export type FollowResult = { status: "following" | "requested" };
 
 export const followUser = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireAuth])
   .inputValidator((data: unknown) => usernameInput.parse(data))
   .handler(async ({ data, context }): Promise<FollowResult> => {
-    const { supabase, userId } = context;
-    const targetId = await resolveUserId(supabase, data.username);
+    const { userId } = context;
+    const targetId = await resolveUserId(data.username);
     if (!targetId) throw new Error("Bruker finnes ikke");
     if (targetId === userId) throw new Error("Du kan ikke følge deg selv");
 
-    // Already following?
-    const { data: existing } = await supabase
-      .from("follows")
-      .select("follower_id")
-      .eq("follower_id", userId)
-      .eq("following_id", targetId)
-      .maybeSingle();
-    if (existing) return { status: "following" };
+    const existing = await db
+      .select({ x: follows.followerId })
+      .from(follows)
+      .where(and(eq(follows.followerId, userId), eq(follows.followingId, targetId)))
+      .limit(1);
+    if (existing.length) return { status: "following" };
 
-    if (await isPrivate(supabase, targetId)) {
-      const { error } = await supabase
-        .from("follow_requests")
-        .upsert(
-          { requester_id: userId, target_id: targetId },
-          { onConflict: "requester_id,target_id", ignoreDuplicates: true },
-        );
-      if (error) throw new Error(error.message);
-
-      // Emit notification (best-effort)
-      await supabase.from("notifications").insert({
-        recipient_id: targetId,
-        actor_id: userId,
-        type: "follow_request",
-      });
-
+    if (await isAccountPrivate(targetId)) {
+      await db
+        .insert(followRequests)
+        .values({ requesterId: userId, targetId })
+        .onConflictDoNothing();
+      await notifySimple(targetId, userId, "follow_request");
       return { status: "requested" };
     }
 
-    const { error } = await supabase
-      .from("follows")
-      .upsert(
-        { follower_id: userId, following_id: targetId },
-        { onConflict: "follower_id,following_id", ignoreDuplicates: true },
-      );
-    if (error) throw new Error(error.message);
+    await db
+      .insert(follows)
+      .values({ followerId: userId, followingId: targetId })
+      .onConflictDoNothing();
+    await notifySimple(targetId, userId, "follow");
     return { status: "following" };
   });
 
 export const unfollowUser = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireAuth])
   .inputValidator((data: unknown) => usernameInput.parse(data))
   .handler(async ({ data, context }): Promise<{ following: false }> => {
-    const { supabase, userId } = context;
-    const targetId = await resolveUserId(supabase, data.username);
+    const { userId } = context;
+    const targetId = await resolveUserId(data.username);
     if (!targetId) return { following: false };
 
-    // Cancel any pending request and any active follow
-    await supabase
-      .from("follow_requests")
-      .delete()
-      .eq("requester_id", userId)
-      .eq("target_id", targetId);
-    // Remove the request notification, if still unread/visible
-    await supabase
-      .from("notifications")
-      .delete()
-      .eq("recipient_id", targetId)
-      .eq("actor_id", userId)
-      .eq("type", "follow_request");
-
-    const { error } = await supabase
-      .from("follows")
-      .delete()
-      .eq("follower_id", userId)
-      .eq("following_id", targetId);
-    if (error) throw new Error(error.message);
+    await db
+      .delete(followRequests)
+      .where(and(eq(followRequests.requesterId, userId), eq(followRequests.targetId, targetId)));
+    await unnotifyFollowRequest(targetId, userId);
+    await db
+      .delete(follows)
+      .where(and(eq(follows.followerId, userId), eq(follows.followingId, targetId)));
     return { following: false };
   });
 
@@ -116,129 +81,88 @@ export type IncomingFollowRequest = {
 };
 
 export const listIncomingFollowRequests = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireAuth])
   .handler(async ({ context }): Promise<IncomingFollowRequest[]> => {
-    const { supabase, userId } = context;
-    const { data: rows, error } = await supabase
-      .from("follow_requests")
-      .select("requester_id, created_at")
-      .eq("target_id", userId)
-      .order("created_at", { ascending: false })
+    const { userId } = context;
+    const rows = await db
+      .select({ requesterId: followRequests.requesterId, createdAt: followRequests.createdAt })
+      .from(followRequests)
+      .where(eq(followRequests.targetId, userId))
+      .orderBy(desc(followRequests.createdAt))
       .limit(200);
-    if (error) throw new Error(error.message);
-    if (!rows?.length) return [];
+    if (!rows.length) return [];
 
-    const ids = rows.map((r) => r.requester_id);
-    const { data: profs } = await supabase
-      .from("profiles")
-      .select("id, username, avatar_path")
-      .in("id", ids);
+    const ids = rows.map((r) => r.requesterId);
+    const profs = await db
+      .select({ id: profiles.id, username: profiles.username, avatarPath: profiles.avatarPath })
+      .from(profiles)
+      .where(inArray(profiles.id, ids));
 
-    const paths = (profs ?? [])
-      .map((p) => p.avatar_path)
-      .filter((p): p is string => !!p);
-    const signed: Record<string, string> = {};
-    if (paths.length) {
-      const { data } = await supabase.storage
-        .from("avatars")
-        .createSignedUrls(paths, 60 * 60);
-      for (const i of data ?? [])
-        if (i.path && i.signedUrl) signed[i.path] = i.signedUrl;
-    }
-    const profById = new Map((profs ?? []).map((p) => [p.id, p] as const));
+    const signed = await presignDownloadMany(profs.map((p) => p.avatarPath));
+    const profById = new Map(profs.map((p) => [p.id, p] as const));
     return rows.map((r) => {
-      const p = profById.get(r.requester_id);
+      const p = profById.get(r.requesterId);
       return {
-        requesterId: r.requester_id,
+        requesterId: r.requesterId,
         username: p?.username ?? "ukjent",
-        avatarUrl: p?.avatar_path ? signed[p.avatar_path] ?? null : null,
-        createdAt: r.created_at,
+        avatarUrl: p?.avatarPath ? signed[p.avatarPath] ?? null : null,
+        createdAt: r.createdAt.toISOString(),
       };
     });
   });
 
 export const acceptFollowRequest = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireAuth])
   .inputValidator((data: unknown) => idInput.parse(data))
   .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
-    // Validate request exists targeting me
-    const { data: row } = await supabase
-      .from("follow_requests")
-      .select("requester_id")
-      .eq("requester_id", data.requesterId)
-      .eq("target_id", userId)
-      .maybeSingle();
-    if (!row) throw new Error("Forespørsel finnes ikke");
+    const { userId } = context;
+    const row = await db
+      .select({ x: followRequests.requesterId })
+      .from(followRequests)
+      .where(
+        and(eq(followRequests.requesterId, data.requesterId), eq(followRequests.targetId, userId)),
+      )
+      .limit(1);
+    if (!row.length) throw new Error("Forespørsel finnes ikke");
 
-    const { error: insErr } = await supabase
-      .from("follows")
-      .upsert(
-        { follower_id: data.requesterId, following_id: userId },
-        { onConflict: "follower_id,following_id", ignoreDuplicates: true },
+    await db
+      .insert(follows)
+      .values({ followerId: data.requesterId, followingId: userId })
+      .onConflictDoNothing();
+    await db
+      .delete(followRequests)
+      .where(
+        and(eq(followRequests.requesterId, data.requesterId), eq(followRequests.targetId, userId)),
       );
-    if (insErr) throw new Error(insErr.message);
-
-    await supabase
-      .from("follow_requests")
-      .delete()
-      .eq("requester_id", data.requesterId)
-      .eq("target_id", userId);
-
-    // Clean up the request notification on my side
-    await supabase
-      .from("notifications")
-      .delete()
-      .eq("recipient_id", userId)
-      .eq("actor_id", data.requesterId)
-      .eq("type", "follow_request");
-
-    // Notify requester we accepted
-    await supabase.from("notifications").insert({
-      recipient_id: data.requesterId,
-      actor_id: userId,
-      type: "follow_accept",
-    });
-
+    await unnotifyFollowRequest(userId, data.requesterId);
+    await notifySimple(data.requesterId, userId, "follow_accept");
     return { ok: true };
   });
 
 export const rejectFollowRequest = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireAuth])
   .inputValidator((data: unknown) => idInput.parse(data))
   .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
-    await supabase
-      .from("follow_requests")
-      .delete()
-      .eq("requester_id", data.requesterId)
-      .eq("target_id", userId);
-    await supabase
-      .from("notifications")
-      .delete()
-      .eq("recipient_id", userId)
-      .eq("actor_id", data.requesterId)
-      .eq("type", "follow_request");
+    const { userId } = context;
+    await db
+      .delete(followRequests)
+      .where(
+        and(eq(followRequests.requesterId, data.requesterId), eq(followRequests.targetId, userId)),
+      );
+    await unnotifyFollowRequest(userId, data.requesterId);
     return { ok: true };
   });
 
 export const cancelFollowRequest = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireAuth])
   .inputValidator((data: unknown) => usernameInput.parse(data))
   .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
-    const targetId = await resolveUserId(supabase, data.username);
+    const { userId } = context;
+    const targetId = await resolveUserId(data.username);
     if (!targetId) return { ok: true };
-    await supabase
-      .from("follow_requests")
-      .delete()
-      .eq("requester_id", userId)
-      .eq("target_id", targetId);
-    await supabase
-      .from("notifications")
-      .delete()
-      .eq("recipient_id", targetId)
-      .eq("actor_id", userId)
-      .eq("type", "follow_request");
+    await db
+      .delete(followRequests)
+      .where(and(eq(followRequests.requesterId, userId), eq(followRequests.targetId, targetId)));
+    await unnotifyFollowRequest(targetId, userId);
     return { ok: true };
   });

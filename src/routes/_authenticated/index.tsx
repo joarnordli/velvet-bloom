@@ -1,14 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
+import { useSuspenseInfiniteQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
 import { z } from "zod";
-import { Suspense } from "react";
+import { Suspense, useEffect, useRef } from "react";
+import { Loader2 } from "lucide-react";
 import { AppShell } from "@/components/brand/AppShell";
 import { FeedHeader } from "@/components/brand/FeedHeader";
 import { PostCard } from "@/components/brand/PostCard";
 import { EmptyFeed } from "@/components/brand/EmptyFeed";
-import { getFeedPosts, type FeedPost } from "@/lib/posts.functions";
+import { getFeedPosts, type FeedPage } from "@/lib/posts.functions";
 
 const feedSearchSchema = z.object({
   view: fallback(z.enum(["anbefalt", "folger"]), "anbefalt").default("anbefalt"),
@@ -29,15 +30,6 @@ export const Route = createFileRoute("/_authenticated/")({
   component: Home,
 });
 
-const feedOptions = (
-  view: FeedView,
-  fn: (args: { data: { view: FeedView } }) => Promise<FeedPost[]>,
-) =>
-  queryOptions({
-    queryKey: ["feed", view],
-    queryFn: () => fn({ data: { view } }),
-  });
-
 function Home() {
   return (
     <AppShell>
@@ -56,15 +48,50 @@ function Home() {
 function Feed() {
   const { view } = Route.useSearch();
   const fetchFeed = useServerFn(getFeedPosts);
-  const { data } = useSuspenseQuery(feedOptions(view, fetchFeed));
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useSuspenseInfiniteQuery({
+      queryKey: ["feed", view],
+      queryFn: ({ pageParam }) => fetchFeed({ data: { view, cursor: pageParam } }),
+      initialPageParam: null as string | null,
+      getNextPageParam: (last: FeedPage) => last.nextCursor ?? undefined,
+    });
 
-  if (!data.length) return <EmptyFeed />;
+  const posts = data.pages.flatMap((p) => p.posts);
+
+  // Preload the next page ~1 screen before the bottom. The scroller is
+  // AppFrame's inner <main>, which fills the viewport, so root:null works.
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && hasNextPage && !isFetchingNextPage) {
+          void fetchNextPage();
+        }
+      },
+      { root: null, rootMargin: "0px 0px 600px 0px" },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  if (posts.length === 0 && !hasNextPage) return <EmptyFeed />;
 
   return (
     <div>
-      {data.map((p) => (
+      {posts.map((p) => (
         <PostCard key={p.id} post={p} />
       ))}
+      <div ref={sentinelRef} aria-hidden className="h-px" />
+      {isFetchingNextPage && (
+        <div className="flex justify-center py-6">
+          <Loader2 className="h-5 w-5 animate-spin text-foreground/40" />
+        </div>
+      )}
+      {!hasNextPage && posts.length > 0 && (
+        <p className="py-8 text-center text-xs text-muted-foreground">Du er à jour</p>
+      )}
     </div>
   );
 }

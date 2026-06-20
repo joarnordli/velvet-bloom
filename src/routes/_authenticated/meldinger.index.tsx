@@ -10,7 +10,7 @@ import { Suspense, useEffect, useState } from "react";
 import { MessageCircle, Pin, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/brand/AppShell";
-import { supabase } from "@/integrations/supabase/client";
+import { usePollInvalidate } from "@/hooks/use-poll-invalidate";
 import {
   listConversations,
   acceptMessageRequest,
@@ -104,38 +104,8 @@ function InboxList({ tab }: { tab: Tab }) {
   );
   const qc = useQueryClient();
 
-  useEffect(() => {
-    const ids = data.map((c) => c.id);
-    if (!ids.length) return;
-    const channel = supabase
-      .channel(`inbox-watch:${tab}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages",
-          filter: `conversation_id=in.(${ids.join(",")})`,
-        },
-        () => {
-          qc.invalidateQueries({ queryKey: ["conversations"] });
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "conversations",
-          filter: `id=in.(${ids.join(",")})`,
-        },
-        () => qc.invalidateQueries({ queryKey: ["conversations"] }),
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [qc, data, tab]);
+  // Polling replacement for Realtime: refresh the inbox list periodically.
+  usePollInvalidate([["conversations"]], 10000);
 
   if (!data.length) {
     return (

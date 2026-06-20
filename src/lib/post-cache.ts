@@ -19,6 +19,17 @@ function isFeedPost(v: unknown): v is FeedPost {
 function isFeedPostArray(v: unknown): v is FeedPost[] {
   return Array.isArray(v) && (v.length === 0 || isFeedPost(v[0]));
 }
+type InfiniteFeed = { pages: Array<{ posts: FeedPost[] }> };
+function isInfiniteFeed(v: unknown): v is InfiniteFeed {
+  if (!v || typeof v !== "object") return false;
+  const pages = (v as { pages?: unknown }).pages;
+  return (
+    Array.isArray(pages) &&
+    pages.every(
+      (pg) => !!pg && typeof pg === "object" && Array.isArray((pg as { posts?: unknown }).posts),
+    )
+  );
+}
 
 /**
  * Patch every cached FeedPost that matches `matcher` across all queries.
@@ -32,7 +43,22 @@ export function patchPosts(
   const entries = qc.getQueriesData<unknown>({});
   for (const [key, data] of entries) {
     if (data == null) continue;
-    if (isFeedPostArray(data)) {
+    if (isInfiniteFeed(data)) {
+      let changed = false;
+      const pages = data.pages.map((page) => {
+        let pageChanged = false;
+        const posts = page.posts.map((p) => {
+          if (matcher(p)) {
+            pageChanged = true;
+            changed = true;
+            return patch(p);
+          }
+          return p;
+        });
+        return pageChanged ? { ...page, posts } : page;
+      });
+      if (changed) qc.setQueryData(key, { ...data, pages });
+    } else if (isFeedPostArray(data)) {
       let changed = false;
       const next = data.map((p) => {
         if (matcher(p)) {
@@ -53,7 +79,18 @@ export function removePost(qc: QueryClient, postId: string) {
   const entries = qc.getQueriesData<unknown>({});
   for (const [key, data] of entries) {
     if (data == null) continue;
-    if (isFeedPostArray(data)) {
+    if (isInfiniteFeed(data)) {
+      let changed = false;
+      const pages = data.pages.map((page) => {
+        const posts = page.posts.filter((p) => p.id !== postId);
+        if (posts.length !== page.posts.length) {
+          changed = true;
+          return { ...page, posts };
+        }
+        return page;
+      });
+      if (changed) qc.setQueryData(key, { ...data, pages });
+    } else if (isFeedPostArray(data)) {
       const next = data.filter((p) => p.id !== postId);
       if (next.length !== data.length) qc.setQueryData(key, next);
     } else if (isFeedPost(data) && data.id === postId) {

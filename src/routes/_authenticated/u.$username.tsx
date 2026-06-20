@@ -14,7 +14,7 @@ import { PostCard } from "@/components/brand/PostCard";
 import { FollowButton } from "@/components/brand/FollowButton";
 import { MessageButton } from "@/components/brand/MessageButton";
 import { useProfileRealtime } from "@/hooks/use-profile-realtime";
-import { supabase } from "@/integrations/supabase/client";
+import { authClient } from "@/lib/auth-client";
 
 
 
@@ -79,7 +79,7 @@ function ProfileBody({ username }: { username: string }) {
 
   const [viewerId, setViewerId] = useState<string | undefined>(undefined);
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setViewerId(data.user?.id));
+    authClient.getSession().then(({ data }) => setViewerId(data?.user?.id));
   }, []);
   useProfileRealtime({ targetUserId: profile.id, viewerId, username });
 

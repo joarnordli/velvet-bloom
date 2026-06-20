@@ -1,9 +1,10 @@
-import { supabase } from "@/integrations/supabase/client";
 import { stripImageMetadata } from "./strip-exif";
+import { createAvatarUpload } from "./uploads.functions";
 
 /**
- * Upload a new avatar to the private `avatars` bucket. Strips EXIF first.
- * Returns the storage path which is then written to profiles.avatar_path.
+ * Upload a new avatar to Cloudflare R2 (key prefix `avatars/`). Strips EXIF
+ * first, then uploads via a server-issued presigned PUT. Returns the object key
+ * which is written to profiles.avatar_path.
  */
 export async function uploadAvatar(file: File): Promise<{ path: string }> {
   if (!file.type.startsWith("image/")) {
@@ -11,19 +12,18 @@ export async function uploadAvatar(file: File): Promise<{ path: string }> {
   }
   const clean = await stripImageMetadata(file);
 
-  const { data: userData, error: userErr } = await supabase.auth.getUser();
-  if (userErr || !userData.user) {
-    throw new Error("Du må være logget inn.");
+  const { key, url } = await createAvatarUpload({
+    data: { contentType: clean.mimeType },
+  });
+
+  const res = await fetch(url, {
+    method: "PUT",
+    body: clean.blob,
+    headers: { "content-type": clean.mimeType },
+  });
+  if (!res.ok) {
+    throw new Error(`Opplasting feilet (${res.status}).`);
   }
 
-  const path = `${userData.user.id}/avatar-${Date.now()}.${clean.extension}`;
-  const { error } = await supabase.storage
-    .from("avatars")
-    .upload(path, clean.blob, {
-      contentType: clean.mimeType,
-      upsert: false,
-      cacheControl: "3600",
-    });
-  if (error) throw new Error(error.message);
-  return { path };
+  return { path: key };
 }

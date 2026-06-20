@@ -1,9 +1,14 @@
 import { createServerFn } from "@tanstack/react-start";
 import { notFound } from "@tanstack/react-router";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { mapPostRows, type FeedPost } from "@/lib/posts.functions";
+import { db } from "@/db";
+import { followRequests, follows, posts, profiles } from "@/db/schema";
+import { requireAuth } from "./auth-middleware";
+import { canViewProfile, isAccountPrivate } from "./authz.server";
+import { presignDownload } from "./storage.server";
+import { mapPostRows } from "./post-hydrate.server";
+import type { FeedPost } from "@/lib/posts.functions";
 
 export type PublicProfile = {
   id: string;
@@ -29,67 +34,69 @@ const usernameInput = z.object({
   username: z.string().trim().min(1).max(60),
 });
 
-async function signAvatar(
-  supabase: SupabaseClient,
-  path: string | null,
-): Promise<string | null> {
-  if (!path) return null;
-  const { data } = await supabase.storage
-    .from("avatars")
-    .createSignedUrl(path, 60 * 60);
-  return data?.signedUrl ?? null;
-}
-
 export const getUserProfileByUsername = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireAuth])
   .inputValidator((data: unknown) => usernameInput.parse(data))
   .handler(async ({ data, context }): Promise<PublicProfile> => {
-    const { supabase, userId } = context;
-    // Identity is readable by username; sensitive detail columns are not —
-    // they come from the privacy-gated get_profile_card RPC below.
-    const { data: row, error } = await supabase
-      .from("profiles")
-      .select("id, username, avatar_path")
-      .eq("username", data.username)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
+    const { userId } = context;
+    // Identity (username/avatar) is always readable; sensitive detail columns
+    // are gated by canViewProfile (replaces the old get_profile_card RPC).
+    const rows = await db
+      .select({
+        id: profiles.id,
+        username: profiles.username,
+        avatarPath: profiles.avatarPath,
+        region: profiles.region,
+        gender: profiles.gender,
+        situation: profiles.situation,
+        lookingFor: profiles.lookingFor,
+        orientation: profiles.orientation,
+        bio: profiles.bio,
+        kinks: profiles.kinks,
+      })
+      .from(profiles)
+      .where(eq(profiles.username, data.username))
+      .limit(1);
+    const row = rows[0];
     if (!row) throw notFound();
 
     const isMe = row.id === userId;
-    const [followers, following, mine, privacy, request, cardRes] = await Promise.all([
-      supabase
-        .from("follows")
-        .select("follower_id", { count: "exact", head: true })
-        .eq("following_id", row.id),
-      supabase
-        .from("follows")
-        .select("following_id", { count: "exact", head: true })
-        .eq("follower_id", row.id),
+    const [
+      [{ followerCount }],
+      [{ followingCount }],
+      mine,
+      isPrivate,
+      request,
+      canView,
+    ] = await Promise.all([
+      db
+        .select({ followerCount: sql<number>`count(*)::int` })
+        .from(follows)
+        .where(eq(follows.followingId, row.id)),
+      db
+        .select({ followingCount: sql<number>`count(*)::int` })
+        .from(follows)
+        .where(eq(follows.followerId, row.id)),
       isMe
-        ? Promise.resolve({ data: null })
-        : supabase
-            .from("follows")
-            .select("follower_id")
-            .eq("follower_id", userId)
-            .eq("following_id", row.id)
-            .maybeSingle(),
-      supabase
-        .rpc("is_account_private", { _user: row.id }),
+        ? Promise.resolve([] as Array<{ x: string }>)
+        : db
+            .select({ x: follows.followerId })
+            .from(follows)
+            .where(and(eq(follows.followerId, userId), eq(follows.followingId, row.id)))
+            .limit(1),
+      isAccountPrivate(row.id),
       isMe
-        ? Promise.resolve({ data: null })
-        : supabase
-            .from("follow_requests")
-            .select("requester_id")
-            .eq("requester_id", userId)
-            .eq("target_id", row.id)
-            .maybeSingle(),
-      supabase.rpc("get_profile_card", { _target: row.id }),
+        ? Promise.resolve([] as Array<{ x: string }>)
+        : db
+            .select({ x: followRequests.requesterId })
+            .from(followRequests)
+            .where(and(eq(followRequests.requesterId, userId), eq(followRequests.targetId, row.id)))
+            .limit(1),
+      canViewProfile(userId, row.id),
     ]);
 
-    const card = cardRes.data?.[0] ?? null;
-    const isFollowing = !isMe && !!mine.data;
-    const hasRequested = !isMe && !!request.data;
-    const isPrivate = !!(privacy.data as boolean | null);
+    const isFollowing = !isMe && mine.length > 0;
+    const hasRequested = !isMe && request.length > 0;
 
     const followStatus: "none" | "requested" | "following" = isFollowing
       ? "following"
@@ -104,45 +111,69 @@ export const getUserProfileByUsername = createServerFn({ method: "POST" })
           ? "unlocked"
           : "locked";
 
+    // Only expose detail columns when the viewer is allowed to see them.
+    const detail = canView
+      ? {
+          region: row.region,
+          gender: row.gender,
+          situation: row.situation,
+          looking_for: row.lookingFor,
+          orientation: row.orientation,
+          bio: row.bio,
+          kinks: row.kinks ?? [],
+        }
+      : {
+          region: null,
+          gender: null,
+          situation: null,
+          looking_for: null,
+          orientation: null,
+          bio: null,
+          kinks: [] as string[],
+        };
+
     return {
       id: row.id,
       username: row.username,
-      region: card?.region ?? null,
-      gender: card?.gender ?? null,
-      situation: card?.situation ?? null,
-      looking_for: card?.looking_for ?? null,
-      orientation: card?.orientation ?? null,
-      bio: card?.bio ?? null,
-      kinks: card?.kinks ?? [],
-      avatar_url: await signAvatar(supabase, row.avatar_path),
+      ...detail,
+      avatar_url: row.avatarPath ? await presignDownload(row.avatarPath) : null,
       isMe,
       isPrivate,
       viewState,
       followStatus,
-      followerCount: followers.count ?? 0,
-      followingCount: following.count ?? 0,
+      followerCount: followerCount ?? 0,
+      followingCount: followingCount ?? 0,
       isFollowing,
     };
   });
 
-
 export const getUserPostsByUsername = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireAuth])
   .inputValidator((data: unknown) => usernameInput.parse(data))
   .handler(async ({ data, context }): Promise<FeedPost[]> => {
-    const { supabase, userId } = context;
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("username", data.username)
-      .maybeSingle();
-    if (!profile) return [];
-    const { data: rows, error } = await supabase
-      .from("posts")
-      .select("id, body, image_path, created_at, author_id, repost_of")
-      .eq("author_id", profile.id)
-      .order("created_at", { ascending: false })
+    const { userId } = context;
+    const prof = await db
+      .select({ id: profiles.id })
+      .from(profiles)
+      .where(eq(profiles.username, data.username))
+      .limit(1);
+    if (!prof.length) return [];
+
+    // Private accounts: only followers (or self) see the posts.
+    if (!(await canViewProfile(userId, prof[0].id))) return [];
+
+    const rows = await db
+      .select({
+        id: posts.id,
+        body: posts.body,
+        imagePath: posts.imagePath,
+        createdAt: posts.createdAt,
+        authorId: posts.authorId,
+        repostOf: posts.repostOf,
+      })
+      .from(posts)
+      .where(eq(posts.authorId, prof[0].id))
+      .orderBy(desc(posts.createdAt))
       .limit(100);
-    if (error) throw new Error(error.message);
-    return mapPostRows(supabase, userId, rows ?? []);
+    return mapPostRows(userId, rows);
   });

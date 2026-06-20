@@ -1,6 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { db } from "@/db";
+import { postComments, posts, profiles } from "@/db/schema";
+import { requireAuth } from "./auth-middleware";
+import { canEngage } from "./authz.server";
+import { notifyComment } from "./notify.server";
 
 export type Comment = {
   id: string;
@@ -17,33 +22,39 @@ export type CommentListResult = {
 const listInput = z.object({ postId: z.string().uuid() });
 
 export const listComments = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireAuth])
   .inputValidator((data: unknown) => listInput.parse(data))
   .handler(async ({ data, context }): Promise<CommentListResult> => {
-    const { supabase, userId } = context;
-    const { data: rows, error } = await supabase
-      .from("post_comments")
-      .select("id, body, created_at, author_id")
-      .eq("post_id", data.postId)
-      .order("created_at", { ascending: true })
+    const { userId } = context;
+    const list = await db
+      .select({
+        id: postComments.id,
+        body: postComments.body,
+        createdAt: postComments.createdAt,
+        authorId: postComments.authorId,
+      })
+      .from(postComments)
+      .where(eq(postComments.postId, data.postId))
+      .orderBy(asc(postComments.createdAt))
       .limit(500);
-    if (error) throw new Error(error.message);
-    const list = rows ?? [];
+
     if (!list.length) return { currentUserId: userId, comments: [] };
-    const ids = Array.from(new Set(list.map((r) => r.author_id)));
-    const { data: profs } = await supabase
-      .from("profiles")
-      .select("id, username")
-      .in("id", ids);
+
+    const ids = Array.from(new Set(list.map((r) => r.authorId)));
+    const profs = await db
+      .select({ id: profiles.id, username: profiles.username })
+      .from(profiles)
+      .where(inArray(profiles.id, ids));
     const names: Record<string, string> = {};
-    for (const p of profs ?? []) names[p.id] = p.username;
+    for (const p of profs) names[p.id] = p.username;
+
     return {
       currentUserId: userId,
       comments: list.map((r) => ({
         id: r.id,
         body: r.body,
-        createdAt: r.created_at,
-        author: { id: r.author_id, username: names[r.author_id] ?? "ukjent" },
+        createdAt: r.createdAt.toISOString(),
+        author: { id: r.authorId, username: names[r.authorId] ?? "ukjent" },
       })),
     };
   });
@@ -54,31 +65,40 @@ const addInput = z.object({
 });
 
 export const addComment = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireAuth])
   .inputValidator((data: unknown) => addInput.parse(data))
   .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
-    const { error } = await supabase.from("post_comments").insert({
-      post_id: data.postId,
-      author_id: userId,
-      body: data.body,
-    });
-    if (error) throw new Error(error.message);
+    const { userId } = context;
+
+    // Engagement gate (old RLS WITH CHECK can_engage on the post author).
+    const author = await db
+      .select({ authorId: posts.authorId })
+      .from(posts)
+      .where(eq(posts.id, data.postId))
+      .limit(1);
+    const authorId = author[0]?.authorId;
+    if (!authorId) throw new Error("Posten finnes ikke.");
+    if (!(await canEngage(userId, authorId))) {
+      throw new Error("Du kan ikke kommentere denne posten.");
+    }
+
+    const [row] = await db
+      .insert(postComments)
+      .values({ postId: data.postId, authorId: userId, body: data.body })
+      .returning({ id: postComments.id });
+    await notifyComment(data.postId, row.id, userId, data.body);
     return { ok: true };
   });
 
 const deleteInput = z.object({ commentId: z.string().uuid() });
 
 export const deleteComment = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireAuth])
   .inputValidator((data: unknown) => deleteInput.parse(data))
   .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
-    const { error } = await supabase
-      .from("post_comments")
-      .delete()
-      .eq("id", data.commentId)
-      .eq("author_id", userId);
-    if (error) throw new Error(error.message);
+    const { userId } = context;
+    await db
+      .delete(postComments)
+      .where(and(eq(postComments.id, data.commentId), eq(postComments.authorId, userId)));
     return { ok: true };
   });

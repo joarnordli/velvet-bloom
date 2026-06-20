@@ -134,31 +134,12 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
-  const router = useRouter();
   useEdgeSwipeBack();
   useTabSwipeNav();
 
-  useEffect(() => {
-    // Single global auth listener — only identity transitions (SIGNED_IN /
-    // SIGNED_OUT) invalidate. USER_UPDATED fires on token refresh (~hourly +
-    // on tab focus); blanket-invalidating then wipes the whole React Query
-    // cache and forces the next view switch to refetch from scratch.
-    let mounted = true;
-    let unsub: (() => void) | undefined;
-    import("@/integrations/supabase/client").then(({ supabase }) => {
-      if (!mounted) return;
-      const { data } = supabase.auth.onAuthStateChange((event) => {
-        if (event !== "SIGNED_IN" && event !== "SIGNED_OUT") return;
-        router.invalidate();
-        if (event === "SIGNED_IN") queryClient.invalidateQueries();
-      });
-      unsub = () => data.subscription.unsubscribe();
-    });
-    return () => {
-      mounted = false;
-      unsub?.();
-    };
-  }, [router, queryClient]);
+  // Auth is cookie-based (Better Auth). Sign-in/up/out flows explicitly
+  // navigate + invalidate, so no global auth-state subscription is needed
+  // (the old Supabase onAuthStateChange listener is gone).
 
   return (
     <QueryClientProvider client={queryClient}>

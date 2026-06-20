@@ -5,7 +5,7 @@ import { Suspense, useRef, useState } from "react";
 import { ArrowLeft, LogOut, Camera, Pencil, Check, Settings } from "lucide-react";
 import { getMyProfile, updateMyProfile, getMyPosts, type MyProfile, type FeedPost } from "@/lib/posts.functions";
 import { uploadAvatar } from "@/lib/upload-avatar";
-import { supabase } from "@/integrations/supabase/client";
+import { authClient } from "@/lib/auth-client";
 import { TotpSetupCard } from "@/components/brand/TotpSetupCard";
 import { PostCard } from "@/components/brand/PostCard";
 import { AppShell } from "@/components/brand/AppShell";
@@ -35,7 +35,7 @@ function ProfilePage() {
   const [tab, setTab] = useState<Tab>("profile");
 
   async function handleSignOut() {
-    await supabase.auth.signOut();
+    await authClient.signOut();
     navigate({ to: "/auth", replace: true });
   }
 

@@ -1,13 +1,13 @@
-import { supabase } from "@/integrations/supabase/client";
 import { stripImageMetadata } from "./strip-exif";
+import { createMessageImageUpload } from "./uploads.functions";
 
 /**
- * Upload a chat image attachment.
+ * Upload a chat image attachment to Cloudflare R2 (key prefix `message-media/`).
  *
  * Invariant: EXIF / GPS / device metadata is stripped client-side BEFORE the
- * storage call (see strip-exif.ts). Storage RLS scopes uploads to members of
- * the target conversation via `is_conversation_member` on the first path
- * segment, so we MUST place the file under `{conversationId}/...`.
+ * upload (see strip-exif.ts). The server issues the presigned PUT only after
+ * verifying the caller is a member of the target conversation, and scopes the
+ * key under `message-media/{conversationId}/...`.
  */
 export type UploadedMessageImage = {
   storagePath: string;
@@ -29,20 +29,21 @@ export async function uploadMessageImage(
   // Read dimensions from the sanitized blob so we can render with stable size.
   const dims = await readImageDimensions(clean.blob);
 
-  const path = `${conversationId}/${crypto.randomUUID()}.${clean.extension}`;
+  const { key, url } = await createMessageImageUpload({
+    data: { contentType: clean.mimeType, conversationId },
+  });
 
-  const { error } = await supabase.storage
-    .from("message-media")
-    .upload(path, clean.blob, {
-      contentType: clean.mimeType,
-      upsert: false,
-      cacheControl: "3600",
-    });
-
-  if (error) throw new Error(error.message);
+  const res = await fetch(url, {
+    method: "PUT",
+    body: clean.blob,
+    headers: { "content-type": clean.mimeType },
+  });
+  if (!res.ok) {
+    throw new Error(`Opplasting feilet (${res.status}).`);
+  }
 
   return {
-    storagePath: path,
+    storagePath: key,
     mime: clean.mimeType,
     width: dims.width,
     height: dims.height,

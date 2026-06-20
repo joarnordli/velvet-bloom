@@ -1,6 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { db } from "@/db";
+import { userPrivacySettings } from "@/db/schema";
+import { requireAuth } from "./auth-middleware";
 
 export type Audience = "everyone" | "followers" | "mutuals" | "nobody";
 
@@ -17,20 +20,23 @@ const DEFAULTS: MyPrivacy = {
 };
 
 export const getMyPrivacy = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireAuth])
   .handler(async ({ context }): Promise<MyPrivacy> => {
-    const { supabase, userId } = context;
-    const { data, error } = await supabase
-      .from("user_privacy_settings")
-      .select("is_private, allow_dm_from, allow_engagement_from")
-      .eq("user_id", userId)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!data) return DEFAULTS;
+    const { userId } = context;
+    const row = await db
+      .select({
+        isPrivate: userPrivacySettings.isPrivate,
+        allowDmFrom: userPrivacySettings.allowDmFrom,
+        allowEngagementFrom: userPrivacySettings.allowEngagementFrom,
+      })
+      .from(userPrivacySettings)
+      .where(eq(userPrivacySettings.userId, userId))
+      .limit(1);
+    if (!row.length) return DEFAULTS;
     return {
-      isPrivate: !!data.is_private,
-      allowDmFrom: (data.allow_dm_from ?? "everyone") as Audience,
-      allowEngagementFrom: (data.allow_engagement_from ?? "everyone") as Audience,
+      isPrivate: !!row[0].isPrivate,
+      allowDmFrom: (row[0].allowDmFrom ?? "everyone") as Audience,
+      allowEngagementFrom: (row[0].allowEngagementFrom ?? "everyone") as Audience,
     };
   });
 
@@ -43,32 +49,35 @@ const updateInput = z.object({
 });
 
 export const updateMyPrivacy = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireAuth])
   .inputValidator((data: unknown) => updateInput.parse(data))
   .handler(async ({ data, context }): Promise<MyPrivacy> => {
-    const { supabase, userId } = context;
-    const patch = {
-      user_id: userId,
-      updated_at: new Date().toISOString(),
-      ...(data.isPrivate !== undefined && { is_private: data.isPrivate }),
-      ...(data.allowDmFrom !== undefined && { allow_dm_from: data.allowDmFrom }),
+    const { userId } = context;
+    const set = {
+      ...(data.isPrivate !== undefined && { isPrivate: data.isPrivate }),
+      ...(data.allowDmFrom !== undefined && { allowDmFrom: data.allowDmFrom }),
       ...(data.allowEngagementFrom !== undefined && {
-        allow_engagement_from: data.allowEngagementFrom,
+        allowEngagementFrom: data.allowEngagementFrom,
       }),
+      updatedAt: new Date(),
     };
-    const { error } = await supabase
-      .from("user_privacy_settings")
-      .upsert(patch, { onConflict: "user_id" });
-    if (error) throw new Error(error.message);
-    // Return fresh row
-    const { data: row } = await supabase
-      .from("user_privacy_settings")
-      .select("is_private, allow_dm_from, allow_engagement_from")
-      .eq("user_id", userId)
-      .maybeSingle();
+    await db
+      .insert(userPrivacySettings)
+      .values({ userId, ...set })
+      .onConflictDoUpdate({ target: userPrivacySettings.userId, set });
+
+    const row = await db
+      .select({
+        isPrivate: userPrivacySettings.isPrivate,
+        allowDmFrom: userPrivacySettings.allowDmFrom,
+        allowEngagementFrom: userPrivacySettings.allowEngagementFrom,
+      })
+      .from(userPrivacySettings)
+      .where(eq(userPrivacySettings.userId, userId))
+      .limit(1);
     return {
-      isPrivate: !!row?.is_private,
-      allowDmFrom: (row?.allow_dm_from ?? "everyone") as Audience,
-      allowEngagementFrom: (row?.allow_engagement_from ?? "everyone") as Audience,
+      isPrivate: !!row[0]?.isPrivate,
+      allowDmFrom: (row[0]?.allowDmFrom ?? "everyone") as Audience,
+      allowEngagementFrom: (row[0]?.allowEngagementFrom ?? "everyone") as Audience,
     };
   });

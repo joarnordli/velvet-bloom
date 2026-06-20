@@ -1,4 +1,4 @@
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, isNull, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import {
   follows,
@@ -6,6 +6,7 @@ import {
   userPrivacySettings,
   conversationParticipants,
   conversations,
+  posts,
 } from "@/db/schema";
 
 /**
@@ -20,6 +21,28 @@ import {
 
 export type DmAudience = "everyone" | "followers" | "mutuals" | "nobody";
 export type DmStatus = "allowed" | "request" | "blocked";
+
+/**
+ * SQL predicate for "posts the viewer is allowed to see", for use in a
+ * `db.select().from(posts).where(...)` on the `posts` table. Replaces the old
+ * Supabase posts SELECT RLS policy — the feed/search must not leak posts from
+ * private accounts the viewer doesn't follow, nor from blocked users.
+ *
+ * A post is visible when its author is the viewer, OR the author isn't private,
+ * OR the viewer follows the author — AND there is no block in either direction.
+ * Correlated subqueries reference the outer `posts.author_id`; indexes on
+ * follows / user_blocks / user_privacy_settings(PK) back them.
+ */
+export function visiblePostsCondition(viewerId: string): SQL {
+  return and(
+    or(
+      eq(posts.authorId, viewerId),
+      sql`NOT EXISTS (SELECT 1 FROM user_privacy_settings ups WHERE ups.user_id = ${posts.authorId} AND ups.is_private = true)`,
+      sql`EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = ${viewerId} AND f.following_id = ${posts.authorId})`,
+    ),
+    sql`NOT EXISTS (SELECT 1 FROM user_blocks b WHERE (b.blocker_id = ${posts.authorId} AND b.blocked_id = ${viewerId}) OR (b.blocker_id = ${viewerId} AND b.blocked_id = ${posts.authorId}))`,
+  )!;
+}
 
 /** Does `a` follow `b`? */
 export async function followsUser(a: string, b: string): Promise<boolean> {

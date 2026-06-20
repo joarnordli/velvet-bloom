@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { follows, posts, profiles } from "@/db/schema";
 import { requireAuth } from "./auth-middleware";
-import { canViewProfile } from "./authz.server";
+import { canViewProfile, visiblePostsCondition } from "./authz.server";
 import { presignDownload, presignDownloadMany, deleteObject } from "./storage.server";
 import { mapPostRows, POST_COLUMNS, type PostRow } from "./post-hydrate.server";
 
@@ -74,6 +74,9 @@ async function fetchFolgerFeed(userId: string, cursor: string | null): Promise<F
     .where(
       and(
         inArray(posts.authorId, authorIds),
+        // Excludes posts from users blocked in either direction (a follow you
+        // later blocked shouldn't keep showing up).
+        visiblePostsCondition(userId),
         cursor ? sql`${posts.createdAt} < ${cursor}` : undefined,
       ),
     )
@@ -90,7 +93,14 @@ async function fetchAnbefaltFeed(userId: string, cursor: string | null): Promise
   const list = await db
     .select(POST_COLUMNS)
     .from(posts)
-    .where(cursor ? sql`${posts.createdAt} < ${cursor}` : undefined)
+    .where(
+      and(
+        // Privacy gate: hide posts from private accounts the viewer doesn't
+        // follow, and from blocked users (either direction).
+        visiblePostsCondition(userId),
+        cursor ? sql`${posts.createdAt} < ${cursor}` : undefined,
+      ),
+    )
     .orderBy(desc(posts.createdAt))
     .limit(FEED_PAGE_SIZE);
 
@@ -138,7 +148,7 @@ export const searchPosts = createServerFn({ method: "POST" })
     const rows = await db
       .select(POST_COLUMNS)
       .from(posts)
-      .where(ilike(posts.body, `%${safe}%`))
+      .where(and(ilike(posts.body, `%${safe}%`), visiblePostsCondition(context.userId)))
       .orderBy(desc(posts.createdAt))
       .limit(50);
     return mapPostRows(context.userId, rows);
@@ -173,7 +183,13 @@ export const searchAll = createServerFn({ method: "POST" })
       db
         .select(POST_COLUMNS)
         .from(posts)
-        .where(and(ilike(posts.body, `%${safe}%`), ne(posts.authorId, userId)))
+        .where(
+          and(
+            ilike(posts.body, `%${safe}%`),
+            ne(posts.authorId, userId),
+            visiblePostsCondition(userId),
+          ),
+        )
         .orderBy(desc(posts.createdAt))
         .limit(60),
     ]);
@@ -303,7 +319,14 @@ export const getPostById = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .inputValidator((data: unknown) => postIdInput.parse(data))
   .handler(async ({ data, context }): Promise<FeedPost | null> => {
-    const rows = await db.select(POST_COLUMNS).from(posts).where(eq(posts.id, data.postId)).limit(1);
+    // visiblePostsCondition gates the single-post fetch too: a private account's
+    // post (or a blocked user's) returns null to non-followers, not a 404-vs-403
+    // distinction that would leak existence.
+    const rows = await db
+      .select(POST_COLUMNS)
+      .from(posts)
+      .where(and(eq(posts.id, data.postId), visiblePostsCondition(context.userId)))
+      .limit(1);
     if (!rows.length) return null;
     const [mapped] = await mapPostRows(context.userId, rows);
     return mapped ?? null;

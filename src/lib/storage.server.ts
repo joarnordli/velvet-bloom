@@ -33,6 +33,13 @@ function client(): S3Client {
         accessKeyId: env("R2_ACCESS_KEY_ID"),
         secretAccessKey: env("R2_SECRET_ACCESS_KEY"),
       },
+      // AWS SDK v3 defaults to injecting a CRC32 checksum into presigned PUTs.
+      // It signs a PLACEHOLDER checksum into the URL, so R2 rejects the real
+      // upload with 403 (surfaced in the browser as a misleading "CORS missing"
+      // error). R2 doesn't require these flexible checksums — disable them so the
+      // presigned PUT/GET round-trips cleanly.
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED",
     });
   }
   return _client;

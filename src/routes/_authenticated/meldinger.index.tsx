@@ -11,6 +11,7 @@ import { MessageCircle, Pin, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/brand/AppShell";
 import { usePollInvalidate } from "@/hooks/use-poll-invalidate";
+import { useRegisterRefresh } from "@/hooks/use-pull-to-refresh";
 import {
   listConversations,
   acceptMessageRequest,
@@ -43,6 +44,11 @@ const inboxOpts = (
 
 function Inbox() {
   const [tab, setTab] = useState<Tab>("chats");
+  const qc = useQueryClient();
+  useRegisterRefresh(() => {
+    qc.invalidateQueries({ queryKey: ["conversations"] });
+    qc.invalidateQueries({ queryKey: ["unread-counts"] });
+  });
   return (
     <AppShell>
       <div className="mx-auto max-w-2xl px-5">

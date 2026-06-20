@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
-import { useSuspenseQuery, queryOptions } from "@tanstack/react-query";
+import { useSuspenseQuery, queryOptions, useQueryClient } from "@tanstack/react-query";
+import { useRegisterRefresh } from "@/hooks/use-pull-to-refresh";
 import { useServerFn } from "@tanstack/react-start";
 import { Suspense, useEffect, useState } from "react";
 import { ArrowLeft, Pencil, Lock } from "lucide-react";
@@ -76,6 +77,12 @@ function ProfileBody({ username }: { username: string }) {
   const { data: posts } = useSuspenseQuery(
     postsOpts(username, () => fetchPosts({ data: { username } })),
   );
+
+  const qc = useQueryClient();
+  useRegisterRefresh(() => {
+    qc.invalidateQueries({ queryKey: profileKey(username) });
+    qc.invalidateQueries({ queryKey: postsKey(username) });
+  });
 
   const [viewerId, setViewerId] = useState<string | undefined>(undefined);
   useEffect(() => {

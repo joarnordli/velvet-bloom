@@ -20,6 +20,7 @@ import {
 import { toast } from "sonner";
 import { AppShell } from "@/components/brand/AppShell";
 import { usePollInvalidate } from "@/hooks/use-poll-invalidate";
+import { useRegisterRefresh } from "@/hooks/use-pull-to-refresh";
 import {
   listNotifications,
   markNotificationsRead,
@@ -72,6 +73,12 @@ function List() {
       .then(() => qc.invalidateQueries({ queryKey: ["unread-counts"] }))
       .catch(() => {});
   }, [markRead, qc]);
+
+  useRegisterRefresh(() => {
+    qc.invalidateQueries({ queryKey: ["notifications"] });
+    qc.invalidateQueries({ queryKey: ["follow-requests"] });
+    qc.invalidateQueries({ queryKey: ["unread-counts"] });
+  });
 
   // Polling replacement for Realtime: refresh the notifications list.
   usePollInvalidate([["notifications"]], 20000);

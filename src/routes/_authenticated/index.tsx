@@ -10,6 +10,7 @@ import { FeedHeader } from "@/components/brand/FeedHeader";
 import { PostCard } from "@/components/brand/PostCard";
 import { EmptyFeed } from "@/components/brand/EmptyFeed";
 import { getFeedPosts, type FeedPage } from "@/lib/posts.functions";
+import { useRegisterRefresh } from "@/hooks/use-pull-to-refresh";
 
 const feedSearchSchema = z.object({
   view: fallback(z.enum(["anbefalt", "folger"]), "anbefalt").default("anbefalt"),
@@ -48,13 +49,15 @@ function Home() {
 function Feed() {
   const { view } = Route.useSearch();
   const fetchFeed = useServerFn(getFeedPosts);
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } =
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, refetch } =
     useSuspenseInfiniteQuery({
       queryKey: ["feed", view],
       queryFn: ({ pageParam }) => fetchFeed({ data: { view, cursor: pageParam } }),
       initialPageParam: null as string | null,
       getNextPageParam: (last: FeedPage) => last.nextCursor ?? undefined,
     });
+
+  useRegisterRefresh(refetch);
 
   const posts = data.pages.flatMap((p) => p.posts);
 

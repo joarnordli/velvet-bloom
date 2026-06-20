@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useSuspenseQuery, useMutation, useQueryClient, queryOptions } from "@tanstack/react-query";
+import { useRegisterRefresh } from "@/hooks/use-pull-to-refresh";
 import { useServerFn } from "@tanstack/react-start";
 import { Suspense, useRef, useState } from "react";
 import { ArrowLeft, LogOut, Camera, Pencil, Check, Settings } from "lucide-react";
@@ -33,6 +34,11 @@ type Tab = "profile" | "edit" | "posts" | "settings";
 function ProfilePage() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("profile");
+  const qc = useQueryClient();
+  useRegisterRefresh(() => {
+    qc.invalidateQueries({ queryKey: ["me"] });
+    qc.invalidateQueries({ queryKey: ["me-posts"] });
+  });
 
   async function handleSignOut() {
     await authClient.signOut();

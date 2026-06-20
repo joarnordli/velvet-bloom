@@ -5,7 +5,7 @@
 # (the Better Auth client is same-origin; R2 creds never reach the browser).
 
 # ---------- Build ----------
-FROM node:22-slim AS builder
+FROM node:24-slim AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -15,7 +15,7 @@ COPY . .
 RUN npm run build
 
 # ---------- Run ----------
-FROM node:22-slim AS runner
+FROM node:24-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
